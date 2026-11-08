@@ -1,0 +1,19 @@
+# Your own machine's build paths (see mod/build_paths.ps1). Never published.
+mod/build_paths.local.ps1
+
+# Build output: published as release assets, not kept in the repository.
+mod/*.dll
+mod/Content/*.bundle
+
+# Files the mod writes next to itself in the game's mod folder.
+cad_style_log*.txt
+look_settings.txt
+look_preset_*.txt
+keys.txt
+feature_status_not_today.txt
+benchmark_results.csv
+
+# Backups and temporary files.
+*.bak
+*.tmp
+__pycache__/
