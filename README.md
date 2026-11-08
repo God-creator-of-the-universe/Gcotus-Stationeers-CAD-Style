@@ -233,7 +233,10 @@ You need Python 3 with `UnityPy` and `lz4`, the .NET SDK, and the game with BepI
 
 ## Changelog
 
-**1.0.0:** first public release. Later versions are listed on the [Releases](https://github.com/God-creator-of-the-universe/Gcotus-Stationeers-CAD-Style/releases) page.
+- **1.0.1:** when the game runs with Vulkan or OpenGL instead of DirectX 11, the look now switches itself off cleanly and the **Status** tab says why.
+- **1.0.0:** first public release.
+
+Every version with its download: [Releases](https://github.com/God-creator-of-the-universe/Gcotus-Stationeers-CAD-Style/releases).
 
 ## How it started
 

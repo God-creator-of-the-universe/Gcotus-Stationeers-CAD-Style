@@ -12,7 +12,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-[BepInPlugin("Gcotu.StationeersCADStyle", "Gcotu Stationeers CAD Style", "1.0.0")]
+[BepInPlugin("Gcotu.StationeersCADStyle", "Gcotu Stationeers CAD Style", "1.0.1")]
 public class CadStylePlugin : BaseUnityPlugin
 {
     void Awake()
@@ -417,7 +417,7 @@ public class CadStyleDither : MonoBehaviour
 
 public class CadStyleRunner : MonoBehaviour
 {
-    const string BuildStamp = "Gcotu Stationeers CAD Style 1.0.0 v[41, 2026-11-08 14!50 UTC]";
+    const string BuildStamp = "Gcotu Stationeers CAD Style 1.0.1 v[42, 2026-11-08 15!50 UTC]";
 
     // ---- Settings -------------------------------------------------------------------------------------------------
     enum S { LineWidth, LineOpacity, CreaseAngle, DepthStep, ColorStep, FacetShade, FacetAzimuth, FacetElevation, AmbientKeep, SmoothForms, Posterize, Bands, BandTop, BandFloor, LineStability, TextureFade, KeepColorLines, GlowStrength, GlowRadius, GlowPasses, AdaptGamma, AdaptSensitivity, AdaptDown, AdaptUp, Dither, GlowColor, ScreenPower, ScreenReach, FlashPower, FlashReach, BoostR, BoostG, BoostB, MakerR, MakerG, MakerB, MakerReach, BatteryPower, BatteryReach, BatteryBias, FurnacePower, FurnaceReach, ApcLed, ApcCell, ApcReach, FlamePower, FlameReach, GradeBlack, GradeWhite, GradeGamma, GradeSaturation, GradeKeep, GradeKeepG, GradeKeepB, FlameRing, FireMax, FirePower, FireGamma, RocketPower, RocketReach, Count }
@@ -657,7 +657,12 @@ public class CadStyleRunner : MonoBehaviour
         LoadKeys();
         Log("game input patches: " + PanelCursorGuard.PatchReport);
         string shaderWhy = "the shader files were not found in Content";
-        foreach (var name in new[] { "cadstyle_dx11.bundle", "cadstyle_full.bundle" })
+        // DirectX 11 only. Under Vulkan or OpenGL the fallback bundle would load with the game's placeholder programs for those
+        // modes (build_look.py keeps them unchanged), so the shaders are not even tried there.
+        var api = SystemInfo.graphicsDeviceType;
+        bool dx11 = api == GraphicsDeviceType.Direct3D11;
+        if (!dx11) shaderWhy = "the game runs with " + api + ", the look is made for DirectX 11 only (remove a launch option such as -force-vulkan)";
+        foreach (var name in dx11 ? new[] { "cadstyle_dx11.bundle", "cadstyle_full.bundle" } : new string[0])
         {
             try
             {
@@ -680,7 +685,7 @@ public class CadStyleRunner : MonoBehaviour
         {
             Log("NO USABLE SHADER, the look stays off: " + shaderWhy);
             _active = false;
-            _lookWhy = shaderWhy + ". Made for engine " + BuiltForEngine + ", the game runs " + Application.unityVersion + ".";
+            _lookWhy = shaderWhy + (dx11 ? ". Made for engine " + BuiltForEngine + ", the game runs " + Application.unityVersion + "." : ".");
         }
         else LoadLampShader();
 
@@ -3617,7 +3622,7 @@ public class CadStyleRunner : MonoBehaviour
     // ---- The window: tabs General, Look, Lights, Advanced, Status (his design, 2026-11-08). -----------------------------
     const float PanelWidth = 440f;
     const int PanelWindowId = 0x4F4C4F4B;
-    const string Version = "1.0.0";
+    const string Version = "1.0.1";
     bool _panelOpen;
     bool _panelPlaced;
     CursorLockMode _lockBefore;

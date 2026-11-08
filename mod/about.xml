@@ -3,7 +3,7 @@
     <Name>Gcotu Stationeers CAD Style</Name>
     <ModID>Gcotu.StationeersCADStyle</ModID>
     <Author>Gcotu</Author>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Description>Gives Stationeers a CAD drawing look: crisp black outlines, flat shading, solid terrain. Stops lamp/sun light from bleeding through walls. Devices, fire and your flashlight light their surroundings. F9 turns the look on and off, F11 opens the window (keys can be changed in keys.txt).</Description>
     <InGameDescription>Gives Stationeers a CAD drawing look: crisp black outlines, flat shading, solid terrain. Stops lamp/sun light from bleeding through walls. Devices, fire and your flashlight light their surroundings. F9 turns the look on and off, F11 opens the window (keys can be changed in keys.txt).</InGameDescription>
 </ModMetadata>
