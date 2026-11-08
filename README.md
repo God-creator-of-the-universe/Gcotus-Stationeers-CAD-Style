@@ -99,7 +99,7 @@ Computers and other devices with a screen, fabricators, consoles, vending machin
 
 ## Requirements
 
-- Stationeers on Windows, running with DirectX 11 (the game's default)
+- Stationeers on Windows, running with **DirectX 11 only** (the game's default). Vulkan, DirectX 12 and OpenGL are not supported.
 - [BepInEx 5](https://github.com/BepInEx/BepInEx) and [StationeersLaunchPad](https://github.com/StationeersLaunchPad/StationeersLaunchPad)
 
 ## Compatibility
