@@ -240,7 +240,7 @@ Every version with its download: [Releases](https://github.com/God-creator-of-th
 
 ## How it started
 
-For a [video on my channel](https://www.youtube.com/watch?v=Cff-GotUdDg), I rendered Stationeers machines in a CAD style. Under that video, YouTube viewer **maxros182** wrote: *"why do objects with that outline effect look so dam good, i wish it just had that all the time"*. Now it does.
+For a [video on my channel](https://www.youtube.com/watch?v=Cff-GotUdDg), I rendered Stationeers machines in a CAD style. Under that video, YouTube viewer **maxros182** wrote: *"why do objects with that outline effect look so dam good, i wish it just had that all the time"*. Now you do :)
 
 <a href="https://www.youtube.com/watch?v=Cff-GotUdDg"><img alt="Watch the video on YouTube: Stationeers News, engine swap, with the CAD-style render" src="./docs/images/video-brutal-cad-render.jpg" width="60%" /></a>
 
