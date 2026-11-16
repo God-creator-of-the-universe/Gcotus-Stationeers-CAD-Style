@@ -8,6 +8,12 @@ Install it, start the game, and the look is there. The defaults are tuned, so th
 
 **[⬇ Download GcotuStationeersCADStyle.zip](https://github.com/God-creator-of-the-universe/Gcotus-Stationeers-CAD-Style/releases/latest/download/GcotuStationeersCADStyle.zip)**  ·  [Quick install](#quick-install)  ·  [Step-by-step install](#step-by-step-install)  ·  [Keys and settings](#keys-and-settings)  ·  [Problems?](#troubleshooting)
 
+## The video
+
+<a href="https://www.youtube.com/watch?v=93CIzH3sVnc"><img alt="Watch the video on YouTube: Stationeers CAD Style mod: black outlines, better lighting, no more light bleeding" src="./docs/images/video-cad-style-showcase.jpg" width="100%" /></a>
+
+**[▶ Watch the video on YouTube](https://www.youtube.com/watch?v=93CIzH3sVnc)**
+
 ## What it looks like
 
 <img alt="Animated comparison: a divider sweeps across tanks and pipes, from the original game to CAD Style and back" src="./docs/images/wipe-machines.webp" width="100%" />
