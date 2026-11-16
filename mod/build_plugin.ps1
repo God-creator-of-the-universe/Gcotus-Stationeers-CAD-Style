@@ -9,7 +9,7 @@ $here = $PSScriptRoot
 . (Join-Path $here "build_paths.ps1")
 $managed = Join-Path $GameDir "rocketstation_Data\Managed"
 $bep = Join-Path $GameDir "BepInEx\core"
-$refs = @("mscorlib", "netstandard", "System", "System.Core", "UnityEngine", "UnityEngine.CoreModule", "UnityEngine.AssetBundleModule", "UnityEngine.ImageConversionModule", "UnityEngine.InputLegacyModule", "UnityEngine.IMGUIModule", "UnityEngine.TextRenderingModule") | ForEach-Object { "-r:" + (Join-Path $managed ($_ + ".dll")) }
+$refs = @("mscorlib", "netstandard", "System", "System.Core", "UnityEngine", "UnityEngine.CoreModule", "UnityEngine.AssetBundleModule", "UnityEngine.ImageConversionModule", "UnityEngine.InputLegacyModule", "UnityEngine.IMGUIModule", "UnityEngine.TextRenderingModule", "UnityEngine.UnityWebRequestModule") | ForEach-Object { "-r:" + (Join-Path $managed ($_ + ".dll")) }
 $refs += "-r:" + (Join-Path $bep "BepInEx.dll")
 $refs += "-r:" + (Join-Path $bep "0Harmony.dll")
 $out = Join-Path $here "GcotuStationeersCADStyle.dll"

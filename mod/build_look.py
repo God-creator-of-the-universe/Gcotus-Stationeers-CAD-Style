@@ -63,6 +63,21 @@ O main(V i)
 }
 """
 
+# Pass 14: with the look off and the light bleed fix on. Only the pure flat normals of pass 0, into _OLFlat, which the lamp
+# shader's cell test reads; the G-buffer stays the game's own.
+PS_FLAT = COMMON + b"""
+float4 main(V i) : SV_Target
+{
+    int2 c = int2(i.p.xy);
+    float3 m = Pos(c), l = Pos(c + int2(-1, 0)), r = Pos(c + int2(1, 0)), u = Pos(c + int2(0, -1)), d = Pos(c + int2(0, 1));
+    float3 dx = abs(r.z - m.z) < abs(m.z - l.z) ? r - m : m - l;
+    float3 dy = abs(d.z - m.z) < abs(m.z - u.z) ? d - m : m - u;
+    float3 n = normalize(cross(dy, dx));
+    if (dot(n, m) > 0) n = -n;
+    return float4(ToWorld(n) * 0.5 + 0.5, 1);
+}
+"""
+
 # Pass 1: after opaque lighting and the sky. Writes a one pixel wide line mask, faded by distance.
 PS_MASK = COMMON + b"""
 Texture2D<float4> _OLFlat : register(t2);
@@ -834,7 +849,7 @@ def main():
     ps_s = compile_hlsl(PS_SHADE, b"ps_4_0")
     ps_st = compile_hlsl(PS_STABLE, b"ps_4_0")
     extra = [(ps_m, 4), (ps_d, 3), (ps_a, 1), (ps_s, 5), (ps_st, 4)]
-    for src_text, n_tex in ((PS_GLOW_EXTRACT, 2), (PS_GLOW_DOWN, 1), (PS_GLOW_UP, 3), (PS_GLOW_ADD, 2), (PS_FADE, 2), (PS_FADE_ARRAY, 2), (PS_EXPOSE, 2), (PS_DITHER, 3)):
+    for src_text, n_tex in ((PS_GLOW_EXTRACT, 2), (PS_GLOW_DOWN, 1), (PS_GLOW_UP, 3), (PS_GLOW_ADD, 2), (PS_FADE, 2), (PS_FADE_ARRAY, 2), (PS_EXPOSE, 2), (PS_DITHER, 3), (PS_FLAT, 2)):
         extra.append((compile_hlsl(src_text, b"ps_4_0"), n_tex))
     print("compiled: VS", len(vs), "gbuffer", len(ps_g), "mask", len(ps_m), "draw", len(ps_d), "ambient", len(ps_a), "shade", len(ps_s), "stable", len(ps_st))
     env = UnityPy.load(os.path.join(data_dir, "resources.assets"))
@@ -883,7 +898,7 @@ def main():
         st["zTest"]["val"] = 8.0
         st["zWrite"]["val"] = 0.0
         st["culling"]["val"] = 0.0
-        p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13 = [copy.deepcopy(p0) for _ in range(13)]
+        p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14 = [copy.deepcopy(p0) for _ in range(14)]
         names = ((p0, ["_CameraDepthTexture", "_OLParams", "_OLGB0", "_OLGB1", "_OLGB2"]),
                  (p1, ["_CameraDepthTexture", "_OLParams", "_OLFlat", "_CameraGBufferTexture0"]),
                  (p2, ["_OLParams", "_OLMask", "_OLNoLine"]),
@@ -897,11 +912,12 @@ def main():
                  (p10, ["_OLFadeP", "_OLFadeSrc"]),
                  (p11, ["_OLFadeP", "_OLFadeSrc"]),
                  (p12, ["_OLParams", "_OLSrc"]),
-                 (p13, ["_OLParams", "_OLSrc", "_OLNoise"]))
+                 (p13, ["_OLParams", "_OLSrc", "_OLNoise"]),
+                 (p14, ["_CameraDepthTexture", "_OLParams"]))
         for p, nm in names:
             p["m_NameIndices"] = [(n, i) for i, n in enumerate(nm)]
             p["progFragment"]["m_CommonParameters"]["m_TextureParams"] = tex_params(nm, ("_OLFadeSrc",) if p is p11 else ())
-        for p, blobs in ((p1, {6: 8, 7: 9}), (p2, {6: 10, 7: 11}), (p3, {6: 12, 7: 13}), (p4, {6: 14, 7: 15}), (p5, {6: 16, 7: 17}), (p6, {6: 18, 7: 19}), (p7, {6: 20, 7: 21}), (p8, {6: 22, 7: 23}), (p9, {6: 24, 7: 25}), (p10, {6: 26, 7: 27}), (p11, {6: 28, 7: 29}), (p12, {6: 30, 7: 31}), (p13, {6: 32, 7: 33})):
+        for p, blobs in ((p1, {6: 8, 7: 9}), (p2, {6: 10, 7: 11}), (p3, {6: 12, 7: 13}), (p4, {6: 14, 7: 15}), (p5, {6: 16, 7: 17}), (p6, {6: 18, 7: 19}), (p7, {6: 20, 7: 21}), (p8, {6: 22, 7: 23}), (p9, {6: 24, 7: 25}), (p10, {6: 26, 7: 27}), (p11, {6: 28, 7: 29}), (p12, {6: 30, 7: 31}), (p13, {6: 32, 7: 33}), (p14, {6: 34, 7: 35})):
             for lst in p["progFragment"]["m_PlayerSubPrograms"]:
                 for e in lst:
                     e["m_BlobIndex"] = blobs[e["m_BlobIndex"]]
@@ -909,7 +925,7 @@ def main():
             b0 = p["m_State"]["rtBlend0"]
             b0["srcBlend"]["val"], b0["destBlend"]["val"] = src_b, dst_b
             b0["srcBlendAlpha"]["val"], b0["destBlendAlpha"]["val"] = 0.0, 1.0
-        pf["m_SubShaders"][0]["m_Passes"] = [p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13]
+        pf["m_SubShaders"][0]["m_Passes"] = [p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14]
         shader_bytes = to_bytes(d, shader_node)
         ab = {"m_Name": "cadstyle_" + tag,
               "m_PreloadTable": [{"m_FileID": 0, "m_PathID": 2}],

@@ -12,7 +12,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-[BepInPlugin("Gcotu.StationeersCADStyle", "Gcotu Stationeers CAD Style", "1.0.1")]
+[BepInPlugin("Gcotu.StationeersCADStyle", "Gcotu Stationeers CAD Style", "1.0.2")]
 public class CadStylePlugin : BaseUnityPlugin
 {
     void Awake()
@@ -400,28 +400,41 @@ public class CadStyleDither : MonoBehaviour
     static readonly int SrcId = Shader.PropertyToID("_OLSrc");
     static readonly int NoiseId = Shader.PropertyToID("_OLNoise");
 
+    // One pass from source into destination (until build 47: copy the frame, draw into source, copy source to destination, three
+    // full-screen steps; measured 3 ms at 4K). An opaque image effect always gets two render textures of the same layout, so
+    // reading source by pixel and writing destination keeps the picture the same way up.
     [ImageEffectOpaque]
     void OnRenderImage(RenderTexture source, RenderTexture destination)
     {
-        var copy = RenderTexture.GetTemporary(source.width, source.height, 0, source.format, RenderTextureReadWrite.Linear);
-        Graphics.CopyTexture(source, copy);
-        Shader.SetGlobalTexture(SrcId, copy);
+        if (destination == null || source == destination)
+        {
+            // Not expected for an opaque effect; the old safe way.
+            var copy = RenderTexture.GetTemporary(source.width, source.height, 0, source.format, RenderTextureReadWrite.Linear);
+            Graphics.CopyTexture(source, copy);
+            Shader.SetGlobalTexture(SrcId, copy);
+            Shader.SetGlobalTexture(NoiseId, Noise);
+            Graphics.SetRenderTarget(source);
+            Mat.SetPass(13);
+            Graphics.DrawMeshNow(Quad, Matrix4x4.identity);
+            RenderTexture.ReleaseTemporary(copy);
+            Graphics.Blit(source, destination);
+            return;
+        }
+        Shader.SetGlobalTexture(SrcId, source);
         Shader.SetGlobalTexture(NoiseId, Noise);
-        Graphics.SetRenderTarget(source);
+        Graphics.SetRenderTarget(destination);
         Mat.SetPass(13);
         Graphics.DrawMeshNow(Quad, Matrix4x4.identity);
-        RenderTexture.ReleaseTemporary(copy);
-        Graphics.Blit(source, destination);
     }
 }
 
 public class CadStyleRunner : MonoBehaviour
 {
-    const string BuildStamp = "Gcotu Stationeers CAD Style 1.0.1 v[42, 2026-11-08 15!50 UTC]";
+    const string BuildStamp = "Gcotu Stationeers CAD Style 1.0.2 v[55, 2026-11-16 21!40 UTC]";
 
     // ---- Settings -------------------------------------------------------------------------------------------------
     enum S { LineWidth, LineOpacity, CreaseAngle, DepthStep, ColorStep, FacetShade, FacetAzimuth, FacetElevation, AmbientKeep, SmoothForms, Posterize, Bands, BandTop, BandFloor, LineStability, TextureFade, KeepColorLines, GlowStrength, GlowRadius, GlowPasses, AdaptGamma, AdaptSensitivity, AdaptDown, AdaptUp, Dither, GlowColor, ScreenPower, ScreenReach, FlashPower, FlashReach, BoostR, BoostG, BoostB, MakerR, MakerG, MakerB, MakerReach, BatteryPower, BatteryReach, BatteryBias, FurnacePower, FurnaceReach, ApcLed, ApcCell, ApcReach, FlamePower, FlameReach, GradeBlack, GradeWhite, GradeGamma, GradeSaturation, GradeKeep, GradeKeepG, GradeKeepB, FlameRing, FireMax, FirePower, FireGamma, RocketPower, RocketReach, Count }
-    enum B { FlatTerrain, HoldBloom, HoldVolumetric, LampSpotsOff, AdaptOn, DitherOn, ScreenLights, Count }
+    enum B { FlatTerrain, HoldBloom, HoldVolumetric, LampSpotsOff, AdaptOn, DitherOn, ScreenLights, LightFix, Count }
 
     // Fixed values: these were sliders until v0.0.33, now his tuned values (his K/A/H sort, 2026-11-07). Old keys in saved files are ignored.
     const float LineFadeStart = 0f, LineFadeEnd = 1000f;   // lines never fade with distance
@@ -466,7 +479,7 @@ public class CadStyleRunner : MonoBehaviour
         new SliderDef("adapt_sensitivity", "Sensitivity",    0.1f,    10f,   0.1f,   0.01f,  "0.00", 2f),
         new SliderDef("adapt_down",      "Fade down (s)",    0.01f,   3f,    1f,     0.01f,  "0.00"),
         new SliderDef("adapt_up",        "Fade up (s)",      0.1f,    20f,   3f,     0.1f,   "0.0"),
-        new SliderDef("dither",          "Blue noise",       0f,      2f,    0.5f,   0.01f,  "0.00"),
+        new SliderDef("dither",          "Strength",       0f,      2f,    0.5f,   0.01f,  "0.00"),
         new SliderDef("glow_color",      "Colored glow",     0f,      1f,    1f,     0.01f,  "0.00"),
         new SliderDef("screen_power",    "Strength",         0f,      5f,    0.5f,   0.01f,  "0.00", 2f),
         new SliderDef("screen_reach",    "Reach (m)",        0.1f,    20f,   1.3f,     0.1f,   "0.0", 2f),
@@ -505,9 +518,10 @@ public class CadStyleRunner : MonoBehaviour
     };
 
     // Same order as B.
-    static readonly string[] ToggleKeys = { "flat_terrain", "hold_bloom", "hold_volumetric", "lamp_spots_off", "adapt_on", "dither_on", "screen_lights" };
-    static readonly bool[] ToggleDefaults = { true, false, true, false, true, true, true };
-    static readonly string[] ToggleLabels = { "Solid-color terrain", "Bloom off", "Volumetric light off", "Lamp spots off", "Eye adaptation", "Blue noise", "Screen lights" };
+    // Files without a key (older settings and presets) take its default, so light_fix=1 keeps the look they were made with.
+    static readonly string[] ToggleKeys = { "flat_terrain", "hold_bloom", "hold_volumetric", "lamp_spots_off", "adapt_on", "dither_on", "screen_lights", "light_fix" };
+    static readonly bool[] ToggleDefaults = { true, false, true, false, true, true, true, true };
+    static readonly string[] ToggleLabels = { "Solid-color terrain", "Bloom off", "Volumetric light off", "Lamp spots off", "Eye adaptation", "Blue noise", "Screen lights", "Light bleed fix" };
     static readonly string[] OffEffects = { "UltimateBloom", "VolumetricLightRenderer" }; // HoldBloom, HoldVolumetric
     const string AlwaysOffEffect = "SSAOPro";
 
@@ -584,7 +598,7 @@ public class CadStyleRunner : MonoBehaviour
         try
         {
             string active = _activeSlot >= 0 ? "active_preset=" + (_activeSlot + 1).ToString(CultureInfo.InvariantCulture) + "\n" : "";
-            WriteSafely(SettingsPath, ValuesText() + active + "window_opens=" + _windowOpens.ToString(CultureInfo.InvariantCulture) + "\npause_on_open=" + (_pauseOnOpen ? "1" : "0") + "\nstatus_seen=" + _statusSeen + "\n");
+            WriteSafely(SettingsPath, ValuesText() + active + "window_opens=" + _windowOpens.ToString(CultureInfo.InvariantCulture) + "\npause_on_open=" + (_pauseOnOpen ? "1" : "0") + "\ntips_on=" + (_tipsOn ? "1" : "0") + "\nstatus_seen=" + _statusSeen + "\n");
         }
         catch (Exception e) { Log("settings save failed: " + e.Message); }
     }
@@ -650,7 +664,7 @@ public class CadStyleRunner : MonoBehaviour
         if (string.IsNullOrEmpty(_dir))
             _dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "My Games", "Stationeers", "mods", "GcotuStationeersCADStyle");
         RollLog();
-        Log("start " + BuildStamp + ", Unity " + Application.unityVersion + ", api " + SystemInfo.graphicsDeviceType + ", reversedZ " + SystemInfo.usesReversedZBuffer + ", dir " + _dir);
+        Log("start " + BuildStamp + ", Unity " + Application.unityVersion + ", api " + SystemInfo.graphicsDeviceType + ", reversedZ " + SystemInfo.usesReversedZBuffer + ", gpu " + SystemInfo.graphicsDeviceName + " " + SystemInfo.graphicsMemorySize + " MB, dir " + _dir);
         LoadSettings();
         for (int i = 0; i < PresetCount; i++) ReadPreset(i);
         LoadBenchmarks();
@@ -670,12 +684,12 @@ public class CadStyleRunner : MonoBehaviour
                 if (b == null) { Log(name + ": LoadFromFile returned null"); shaderWhy = "the shader file " + name + " did not load"; continue; }
                 var s = b.LoadAllAssets<Shader>().FirstOrDefault();
                 Log(name + ": shader " + (s == null ? "missing" : "'" + s.name + "' supported=" + s.isSupported + " passes=" + s.passCount));
-                if (s != null && s.isSupported && s.passCount == 14)
+                if (s != null && s.isSupported && s.passCount == 15)
                 {
                     _mat = new Material(s) { hideFlags = HideFlags.HideAndDontSave };
                     break;
                 }
-                shaderWhy = s == null ? "the shader file " + name + " holds no shader" : !s.isSupported ? "this graphics card or graphics mode can't run the shader (it is made for DirectX 11)" : "the shader has " + s.passCount + " parts instead of 14";
+                shaderWhy = s == null ? "the shader file " + name + " holds no shader" : !s.isSupported ? "this graphics card or graphics mode can't run the shader (it is made for DirectX 11)" : "the shader has " + s.passCount + " parts instead of 15";
                 b.Unload(true);
             }
             catch (Exception e) { Log(name + ": " + e); shaderWhy = "the shader file " + name + " failed to load: " + e.Message; }
@@ -709,6 +723,8 @@ public class CadStyleRunner : MonoBehaviour
     {
         Camera.onPreRender -= PreRender;
         SetLampFix(false);
+        RemoveFlatOnly();
+        ApplyLightBleed(false);
         ShowHand(false);
         if (_settingsDirty) SaveSettings();
     }
@@ -741,6 +757,8 @@ public class CadStyleRunner : MonoBehaviour
             var cam = Camera.main;
             if (cam != _cam)
             {
+                CancelMeasure();
+                CancelBulk();
                 Uninstall();
                 _cam = cam;
                 _componentsLogged = false;
@@ -751,14 +769,21 @@ public class CadStyleRunner : MonoBehaviour
             ReportJobs();
             PanelCursorGuard.UpdateCursorBlock();
             UpdateMeasure();
-            SetLampFix(_active && _cam != null);
+            UpdateBulk();
+            UpdateUpdateCheck();
+            // The light bleed fix runs with the look on or off. Its switch covers all of it: the lamp shader, the flat normals it reads
+            // (from the look's pass 0, or pass 14 alone with the look off) and the shadow values. Off = the game's own lamp and sun lighting.
+            bool lightFix = FixWanted && _cam != null;
+            SetLampFix(lightFix);
+            UpdateFlatOnly();
             UpdateDither();
+            if (!lightFix) { if (_bleedTouched) ApplyLightBleed(false); }
+            else if (_frame % 120 == 0 || !_bleedTouched) { long started = Clock(); ApplyLightBleed(true); Note("lamp shadow values", started); }
             if (_active && _cam != null)
             {
                 if ((V(S.GlowStrength) > 0f) != _builtGlow) BuildBuffers();
                 if (_lines != null) _lines.Glow = _builtGlow;
                 UpdateFade();
-                if (_frame % 120 == 0 || !_bleedTouched) { long started = Clock(); ApplyLightBleed(true); Note("lamp shadow values", started); }
                 if (_frame % 120 == 0) ApplyLampSpots(_b[(int)B.LampSpotsOff]);
                 { long started = Clock(); UpdateBulbs(); Note("round bulbs", started); }
                 UpdateAdaptation();
@@ -801,7 +826,13 @@ public class CadStyleRunner : MonoBehaviour
         if (on && _mat == null) return;
         _active = on;
         Log("look active=" + _active);
-        if (_active) Install(); else Uninstall();
+        if (_active) Install();
+        else
+        {
+            Uninstall();
+            // The bleed fix's own flat normals take over in this same frame, so its lamp shader never reads a missing texture.
+            UpdateFlatOnly();
+        }
     }
 
     bool _depthAdded;
@@ -809,7 +840,11 @@ public class CadStyleRunner : MonoBehaviour
     void Install()
     {
         if (_cam == null || _gbufferBuffer != null) return;
-        _depthAdded = (_cam.depthTextureMode & DepthTextureMode.Depth) == 0;
+        // The look's pass 0 writes the flat normals from here on; a depth texture the bleed fix's own pass asked for passes to the look.
+        bool flatDepth = _flatDepthAdded && _flatCam == _cam;
+        _flatDepthAdded = false;
+        RemoveFlatOnly();
+        _depthAdded = flatDepth || (_cam.depthTextureMode & DepthTextureMode.Depth) == 0;
         _cam.depthTextureMode |= DepthTextureMode.Depth;
         Log("installing on camera '" + _cam.name + "', path " + _cam.actualRenderingPath + ", hdr " + _cam.allowHDR + ", size " + _cam.pixelWidth + "x" + _cam.pixelHeight);
         if (!_componentsLogged)
@@ -844,7 +879,7 @@ public class CadStyleRunner : MonoBehaviour
         _lines = null;
         _gbufferBuffer = null;
         _releaseBuffer = null;
-        ApplyLightBleed(false);
+        // The light bleed fix stays as its own switch says (Update), with the look on or off.
         ApplyLampSpots(false);
         RestoreBulbs();
         ClearDeviceLights();
@@ -946,6 +981,22 @@ public class CadStyleRunner : MonoBehaviour
     {
         if (!on && !_bleedTouched) return;
         var clock = System.Diagnostics.Stopwatch.StartNew();
+        if (!on)
+        {
+            // Every light we changed gets its own values back, wherever it is now. Until build 44 this went through the scene scan, which skips
+            // lights under an inactive object, so a lamp put away (in a locker, say) after we changed it kept our values (his test, 2026-11-16).
+            foreach (var kv in _lightBias)
+            {
+                if (kv.Key == null) continue;
+                kv.Key.shadowBias = kv.Value[0];
+                kv.Key.shadowCustomResolution = (int)kv.Value[1];
+            }
+            _lightBias.Clear();
+            _bleedTouched = false;
+            CheckLightsRestored();
+            if (clock.ElapsedMilliseconds > 20) Log("lamp shadow values took " + clock.ElapsedMilliseconds + " ms");
+            return;
+        }
         var seen = _biasLogged ? null : new Dictionary<string, int>();
         // Real lamps only. A prefab changed here would hand our values to every lamp made from it, and those would then pass for the game's own.
         foreach (var l in Resources.FindObjectsOfTypeAll<Light>())
@@ -953,15 +1004,6 @@ public class CadStyleRunner : MonoBehaviour
             if (l == null || !l.gameObject.scene.IsValid() || IsGameTemplate(l)) continue;
             float[] was;
             bool known = _lightBias.TryGetValue(l, out was);
-            if (!on)
-            {
-                if (known)
-                {
-                    l.shadowBias = was[0];
-                    l.shadowCustomResolution = (int)was[1];
-                }
-                continue;
-            }
             bool isSun = l.type == LightType.Directional;
             if (!known)
             {
@@ -980,14 +1022,48 @@ public class CadStyleRunner : MonoBehaviour
             int size = isSun ? (int)was[1] : LampShadowSize;
             if (l.shadowCustomResolution != size) l.shadowCustomResolution = size;
         }
-        if (!on) _lightBias.Clear();
         if (seen != null && seen.Count > 0)
         {
             if (seen.Keys.Any(k => k.StartsWith("sun"))) _biasLogged = true;
             Log("game's own shadow values: " + string.Join(", ", seen.Select(kv => kv.Key + " x" + kv.Value)));
         }
-        _bleedTouched = on;
+        _bleedTouched = true;
         if (clock.ElapsedMilliseconds > 20) Log("lamp shadow values took " + clock.ElapsedMilliseconds + " ms");
+    }
+
+    // Proof in the log that switching the fix off gave the game's own values back. The game never sets a light's own shadow map size
+    // (only Prefab.cs:145 offset 0.1 and WorldManager.cs:1631 sun offset 0.2), so any light, game template or not, still at the fix's
+    // lamp size is a leftover of ours. The values seen are listed as in the "game's own shadow values" line.
+    void CheckLightsRestored()
+    {
+        var seen = new Dictionary<string, int>();
+        var offenders = new List<string>();
+        int leftovers = 0, templates = 0;
+        foreach (var l in Resources.FindObjectsOfTypeAll<Light>())
+        {
+            if (l == null || !l.gameObject.scene.IsValid()) continue;
+            bool template = IsGameTemplate(l);
+            if (l.shadowCustomResolution == LampShadowSize)
+            {
+                if (template) templates++; else leftovers++;
+                if (offenders.Count < 12) offenders.Add(PathOf(l.transform) + (template ? " (inactive)" : "") + " offset " + l.shadowBias.ToString("0.###", CultureInfo.InvariantCulture));
+            }
+            if (template) continue;
+            string key = (l.type == LightType.Directional ? "sun offset " : "lamp offset ") + l.shadowBias.ToString("0.###", CultureInfo.InvariantCulture) + " size " + l.shadowCustomResolution.ToString(CultureInfo.InvariantCulture);
+            int n;
+            seen.TryGetValue(key, out n);
+            seen[key] = n + 1;
+        }
+        Log("light bleed fix off, shadow values now: " + string.Join(", ", seen.Select(kv => kv.Key + " x" + kv.Value))
+            + (leftovers + templates == 0 ? "; no light left at size " + LampShadowSize : "; WARNING still at size " + LampShadowSize + ": " + leftovers + " active lights, " + templates + " under inactive objects: " + string.Join(" | ", offenders)));
+    }
+
+    // root/.../light, at most 6 levels, for the log.
+    static string PathOf(Transform t)
+    {
+        var parts = new List<string>();
+        for (var p = t; p != null && parts.Count < 6; p = p.parent) parts.Insert(0, p.name);
+        return (t.root != null && parts[0] != t.root.name ? t.root.name + "/../" : "") + string.Join("/", parts);
     }
 
     // ---- Round lamp bulbs: the game makes emissive only the parts in the lamp's paint material. On round lamps that is the body, not the bulb. ----
@@ -1076,7 +1152,7 @@ public class CadStyleRunner : MonoBehaviour
 
     CadStyleDither _ditherFx;
 
-    bool DitherWanted { get { return _b[(int)B.DitherOn] && V(S.Dither) > 0f; } }
+    bool DitherWanted { get { return (_ditherForce < 0 ? _b[(int)B.DitherOn] : _ditherForce == 1) && V(S.Dither) > 0f; } }
 
     // Independent of the look: only its own checkbox and slider count.
     void UpdateDither()
@@ -2310,6 +2386,56 @@ public class CadStyleRunner : MonoBehaviour
         }
     }
 
+    // ---- The bleed fix without the look: pass 14 writes only the flat normals the lamp shader's cell test reads. ------------
+    // Wanted only with both shader files loaded: the lamp shader without flat normals, or our small offsets without the lamp shader,
+    // would give speckled shadows, so then the game's own lighting stays (as the Status tab says).
+    CommandBuffer _flatBuffer, _flatRelease;
+    Camera _flatCam;
+    bool _flatDepthAdded;
+    // MEASURE and MEASURE BULK set these: -1 = as the switch says, 0 = held off, 1 = held on.
+    int _fixForce = -1, _ditherForce = -1;
+
+    bool FixAvailable { get { return _lampShader != null && _mat != null; } }
+    bool FixWanted { get { return (_fixForce < 0 ? _b[(int)B.LightFix] : _fixForce == 1) && FixAvailable; } }
+
+    void UpdateFlatOnly()
+    {
+        bool want = FixWanted && !_active && _cam != null && _cam.actualRenderingPath == RenderingPath.DeferredShading;
+        if (_flatBuffer != null && (!want || _flatCam != _cam)) RemoveFlatOnly();
+        if (!want || _flatBuffer != null) return;
+        int flat = Shader.PropertyToID("_OLFlat");
+        var g = new CommandBuffer { name = "CadStyle flat normals" };
+        g.GetTemporaryRT(flat, -1, -1, 0, FilterMode.Point, RenderTextureFormat.ARGB2101010, RenderTextureReadWrite.Linear);
+        g.SetRenderTarget(flat);
+        g.DrawMesh(_quad, Matrix4x4.identity, _mat, 0, 14);
+        var r = new CommandBuffer { name = "CadStyle flat normals release" };
+        r.ReleaseTemporaryRT(flat);
+        _flatDepthAdded = (_cam.depthTextureMode & DepthTextureMode.Depth) == 0;
+        _cam.depthTextureMode |= DepthTextureMode.Depth;
+        _cam.AddCommandBuffer(CameraEvent.BeforeReflections, g);
+        _cam.AddCommandBuffer(CameraEvent.AfterLighting, r);
+        _flatBuffer = g;
+        _flatRelease = r;
+        _flatCam = _cam;
+        Log("bleed fix without the look: flat normals pass on camera '" + _cam.name + "'");
+    }
+
+    void RemoveFlatOnly()
+    {
+        if (_flatBuffer == null) return;
+        if (_flatCam != null)
+        {
+            _flatCam.RemoveCommandBuffer(CameraEvent.BeforeReflections, _flatBuffer);
+            _flatCam.RemoveCommandBuffer(CameraEvent.AfterLighting, _flatRelease);
+            if (_flatDepthAdded && !(_flatCam == _cam && _gbufferBuffer != null)) _flatCam.depthTextureMode &= ~DepthTextureMode.Depth;
+        }
+        _flatBuffer = null;
+        _flatRelease = null;
+        _flatCam = null;
+        _flatDepthAdded = false;
+        Log("bleed fix without the look: flat normals pass removed");
+    }
+
     // ---- Lamp spots: only the lamps' own flares, by their object name. The sun has its own and is never touched. --------
     readonly HashSet<LensFlare> _spotsOff = new HashSet<LensFlare>();
 
@@ -2332,26 +2458,53 @@ public class CadStyleRunner : MonoBehaviour
         _spotsOff.Clear();
     }
 
-    // ---- Cost meter: look on and off in turns, without vsync, so frame times show the real cost. ------------------------
+    // ---- Cost meter (his design 2026-11-16): each part that is on when MEASURE is clicked (look, bleed fix, dithering) is flipped
+    // on and off by itself in turns while the others stay as set, without vsync, so frame times show each part's real cost. ------
     const float MeasureSettle = 1f, MeasureSample = 2f;
     const int MeasureSpans = 6;
     const int ResultsShown = 5;
     int _measureSpan = -1;
     float _measureSpanAt;
     int _vsyncBefore, _targetFpsBefore;
+    readonly List<int> _measureParts = new List<int>();
+    int _measurePart;   // index into _measureParts
     readonly List<float>[] _measureTimes = { new List<float>(), new List<float>(), new List<float>(), new List<float>(), new List<float>(), new List<float>() };
     readonly List<string> _measureResults = new List<string>();
 
-    string BenchmarkPath { get { return Path.Combine(_dir, "benchmark_results.csv"); } }
+    // From v1.0.2 one record per part; benchmark_results.csv (look only, older builds) is left as it is.
+    string BenchmarkPath { get { return Path.Combine(_dir, "benchmark_parts.csv"); } }
+
+    // What MEASURE would measure now: the parts that are on and do something.
+    List<int> PartsToMeasure()
+    {
+        var parts = new List<int>();
+        if (_active) parts.Add(0);
+        if (_b[(int)B.LightFix] && FixAvailable) parts.Add(1);
+        if (_b[(int)B.DitherOn] && V(S.Dither) > 0f && _mat != null) parts.Add(2);
+        return parts;
+    }
 
     void StartMeasure()
     {
-        if (_measureSpan >= 0 || !_active) return;
+        if (Measuring) return;
+        var parts = PartsToMeasure();
+        if (parts.Count == 0) return;
+        _measureParts.Clear();
+        _measureParts.AddRange(parts);
+        _measurePart = 0;
         _vsyncBefore = QualitySettings.vSyncCount;
         _targetFpsBefore = Application.targetFrameRate;
         foreach (var list in _measureTimes) list.Clear();
         _measureSpan = 0;
         _measureSpanAt = Time.unscaledTime;
+        Log("cost meter: measuring " + string.Join(", ", parts.Select(i => PartLabels[i]).ToArray()));
+    }
+
+    void HoldPart(int part, bool held)
+    {
+        if (part == 0) { if (_active == held) SetActive(!held); }
+        else if (part == 1) _fixForce = held ? 0 : -1;
+        else _ditherForce = held ? 0 : -1;
     }
 
     static float Median(List<float> values)
@@ -2371,37 +2524,178 @@ public class CadStyleRunner : MonoBehaviour
         float inSpan = Time.unscaledTime - _measureSpanAt;
         if (inSpan > MeasureSettle) _measureTimes[_measureSpan].Add(Time.unscaledDeltaTime * 1000f);
         if (inSpan < MeasureSettle + MeasureSample) return;
+        int part = _measureParts[_measurePart];
         _measureSpan++;
         _measureSpanAt = Time.unscaledTime;
-        if (_measureSpan < MeasureSpans) { SetActive(_measureSpan % 2 == 0); return; }
+        if (_measureSpan < MeasureSpans) { HoldPart(part, _measureSpan % 2 == 1); return; }
+        HoldPart(part, false);
+        FinishMeasure(part);
+        _measurePart++;
+        if (_measurePart < _measureParts.Count)
+        {
+            foreach (var list in _measureTimes) list.Clear();
+            _measureSpan = 0;
+            return;
+        }
         _measureSpan = -1;
-        SetActive(true);
         QualitySettings.vSyncCount = _vsyncBefore;
         Application.targetFrameRate = _targetFpsBefore;
-        FinishMeasure();
     }
 
-    void FinishMeasure()
+    // Stops a run early when the camera changes (a world loading or going away); every part goes back as it was set.
+    void CancelMeasure()
+    {
+        if (_measureSpan < 0) return;
+        HoldPart(_measureParts[_measurePart], false);
+        _measureSpan = -1;
+        QualitySettings.vSyncCount = _vsyncBefore;
+        Application.targetFrameRate = _targetFpsBefore;
+        Log("cost meter: stopped early");
+    }
+
+    void FinishMeasure(int part)
     {
         var on = new List<float>();
         var off = new List<float>();
         for (int i = 0; i < MeasureSpans; i++) (i % 2 == 0 ? on : off).AddRange(_measureTimes[i]);
         float onMs = Median(on), offMs = Median(off), change = onMs - offMs;
+        _partCost[part] = (change < 0f ? "-" : "") + Mathf.Abs(change).ToString("0.0", CultureInfo.InvariantCulture) + " MS";
         string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-        string summary = string.Format(CultureInfo.InvariantCulture, "{0} UTC: mod {1} {2:0.0} ms per frame (on {3:0.0} ms = {4:0} fps; off {5:0.0} ms = {6:0} fps)",
-            stamp, change >= 0f ? "costs" : "saves", Mathf.Abs(change), onMs, onMs > 0f ? 1000f / onMs : 0f, offMs, offMs > 0f ? 1000f / offMs : 0f);
-        var spans = string.Join(";", _measureTimes.Select(t => Median(t).ToString("0.00", CultureInfo.InvariantCulture)));
-        var counts = string.Join(";", _measureTimes.Select(t => t.Count.ToString(CultureInfo.InvariantCulture)));
+        string summary = string.Format(CultureInfo.InvariantCulture, "{0} UTC: {1} {2} {3:0.0} ms per frame (on {4:0.0} ms = {5:0} fps; off {6:0.0} ms = {7:0} fps)",
+            stamp, PartLabels[part], change >= 0f ? "costs" : "saves", Mathf.Abs(change), onMs, onMs > 0f ? 1000f / onMs : 0f, offMs, offMs > 0f ? 1000f / offMs : 0f)
+            + (GamePaused() ? ", game paused" : "");
+        var spans = string.Join(";", _measureTimes.Select(t => Median(t).ToString("0.00", CultureInfo.InvariantCulture)).ToArray());
+        var counts = string.Join(";", _measureTimes.Select(t => t.Count.ToString(CultureInfo.InvariantCulture)).ToArray());
         var values = string.Join(";", Sliders.Select((d, i) => d.Key + "=" + _v[i].ToString("0.#####", CultureInfo.InvariantCulture))
-            .Concat(ToggleKeys.Select((k, i) => k + "=" + (_b[i] ? "1" : "0"))));
+            .Concat(ToggleKeys.Select((k, i) => k + "=" + (_b[i] ? "1" : "0")))
+            .Concat(new[] { "look_on=" + (_active ? "1" : "0"), "game_paused=" + (GamePaused() ? "1" : "0") }).ToArray());
         string record = stamp + "," + Csv(BuildStamp) + "," + Screen.width + "x" + Screen.height + "," + Screen.currentResolution.refreshRateRatio.value.ToString("0.##", CultureInfo.InvariantCulture)
-            + "," + _vsyncBefore + "," + _targetFpsBefore + "," + onMs.ToString("0.00", CultureInfo.InvariantCulture) + "," + offMs.ToString("0.00", CultureInfo.InvariantCulture)
+            + "," + _vsyncBefore + "," + _targetFpsBefore + "," + PartKeys[part] + "," + onMs.ToString("0.00", CultureInfo.InvariantCulture) + "," + offMs.ToString("0.00", CultureInfo.InvariantCulture)
             + "," + spans + "," + counts + "," + values + "," + Csv(summary);
         _measureResults.Add(summary);
         if (_measureResults.Count > ResultsShown) _measureResults.RemoveAt(0);
         Log("cost meter: " + summary);
         try { AppendBenchmark(record); }
         catch (Exception e) { Log("benchmark save failed: " + e.Message); }
+    }
+
+    static readonly string[] PartKeys = { "look", "bleed_fix", "dithering" };
+
+    // ---- MEASURE BULK (his design 2026-11-16): all 8 on/off states of LOOK, BLEED FIX and DITHERING, all-off included as the
+    // baseline. After each switch 2 s are thrown away so the renderer settles, then 2 s of frame times are kept. The 8 states run
+    // three times, forward, backward, forward, so a slow drift in the scene cancels out. One run = one record in benchmark_bulk.csv.
+    const float BulkSettle = 2f, BulkSample = 2f;
+    const int BulkRounds = 3;
+    int _bulkStep = -1;   // 0 .. 8 x BulkRounds - 1 while running
+    float _bulkStepAt;
+    readonly List<float>[] _bulkTimes = new List<float>[8];
+    readonly List<string> _bulkLines = new List<string>();
+    bool _bulkLookBefore;
+    bool Measuring { get { return _measureSpan >= 0 || _bulkStep >= 0; } }
+
+    // State bits: 1 look, 2 bleed fix, 4 dithering.
+    static readonly string[] BulkStateNames = { "ALL OFF", "LOOK", "BLEED FIX", "LOOK + BLEED FIX", "DITHERING", "LOOK + DITHERING", "BLEED FIX + DITHERING", "ALL THREE" };
+    static readonly string[] BulkStateKeys = { "off", "look", "fix", "look_fix", "dither", "look_dither", "fix_dither", "all" };
+
+    int BulkState(int step)
+    {
+        int round = step / 8, i = step % 8;
+        return round % 2 == 0 ? i : 7 - i;
+    }
+
+    void ApplyBulkState(int state)
+    {
+        bool look = (state & 1) != 0;
+        if (_active != look) SetActive(look);
+        _fixForce = (state & 2) != 0 ? 1 : 0;
+        _ditherForce = (state & 4) != 0 ? 1 : 0;
+    }
+
+    void StartBulk()
+    {
+        if (Measuring || _mat == null) return;
+        _bulkLookBefore = _active;
+        _vsyncBefore = QualitySettings.vSyncCount;
+        _targetFpsBefore = Application.targetFrameRate;
+        for (int i = 0; i < 8; i++) { if (_bulkTimes[i] == null) _bulkTimes[i] = new List<float>(); _bulkTimes[i].Clear(); }
+        _bulkStep = 0;
+        _bulkStepAt = Time.unscaledTime;
+        ApplyBulkState(BulkState(0));
+        Log("cost meter: BULK started, 8 states x " + BulkRounds + (FixAvailable ? "" : ", bleed fix not available") + (V(S.Dither) > 0f ? "" : ", dithering strength 0"));
+    }
+
+    void EndBulk()
+    {
+        _bulkStep = -1;
+        _fixForce = -1;
+        _ditherForce = -1;
+        if (_active != _bulkLookBefore) SetActive(_bulkLookBefore);
+        QualitySettings.vSyncCount = _vsyncBefore;
+        Application.targetFrameRate = _targetFpsBefore;
+    }
+
+    void CancelBulk()
+    {
+        if (_bulkStep < 0) return;
+        EndBulk();
+        Log("cost meter: BULK stopped early");
+    }
+
+    void UpdateBulk()
+    {
+        if (_bulkStep < 0) return;
+        QualitySettings.vSyncCount = 0;
+        Application.targetFrameRate = -1;
+        float inStep = Time.unscaledTime - _bulkStepAt;
+        if (inStep > BulkSettle) _bulkTimes[BulkState(_bulkStep)].Add(Time.unscaledDeltaTime * 1000f);
+        if (inStep < BulkSettle + BulkSample) return;
+        _bulkStep++;
+        _bulkStepAt = Time.unscaledTime;
+        if (_bulkStep < 8 * BulkRounds) { ApplyBulkState(BulkState(_bulkStep)); return; }
+        bool paused = GamePaused();
+        EndBulk();
+        FinishBulk(paused);
+    }
+
+    void FinishBulk(bool paused)
+    {
+        var ms = new float[8];
+        for (int i = 0; i < 8; i++) ms[i] = Median(_bulkTimes[i]);
+        string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        Func<float, string> f2 = x => x.ToString("0.00", CultureInfo.InvariantCulture);
+        Func<float, string> d1 = x => (x < 0f ? "-" : "+") + Mathf.Abs(x).ToString("0.0", CultureInfo.InvariantCulture);
+        _bulkLines.Clear();
+        _bulkLines.Add("BULK " + stamp + " UTC" + (paused ? ", GAME PAUSED" : ""));
+        // Every row names all three parts, ON or OFF, so no part is left to guess (his report 2026-11-16).
+        _bulkLines.Add("LOOK BLEED DITHER    FRAME   FPS    COST");
+        foreach (int i in new[] { 0, 1, 2, 4, 3, 5, 6, 7 })
+            _bulkLines.Add(((i & 1) != 0 ? "ON " : "OFF").PadRight(5) + ((i & 2) != 0 ? "ON " : "OFF").PadRight(6) + ((i & 4) != 0 ? "ON " : "OFF").PadRight(6)
+                + (ms[i].ToString("0.0", CultureInfo.InvariantCulture) + " MS").PadLeft(10) + (ms[i] > 0f ? (1000f / ms[i]).ToString("0", CultureInfo.InvariantCulture) : "0").PadLeft(6)
+                + (i == 0 ? "    BASE" : (d1(ms[i] - ms[0]) + " MS").PadLeft(10)));
+        _bulkLines.Add("BLEED FIX WITH THE LOOK ON " + d1(ms[3] - ms[1]) + " MS, WITH IT OFF " + d1(ms[2] - ms[0]) + " MS");
+        for (int p = 0; p < 3; p++) _partCost[p] = (ms[1 << p] - ms[0] < 0f ? "-" : "") + Mathf.Abs(ms[1 << p] - ms[0]).ToString("0.0", CultureInfo.InvariantCulture) + " MS";
+        string summary = string.Format(CultureInfo.InvariantCulture, "{0} UTC: BULK all off {1:0.0} ms, all three {2:0.0} ms ({3} ms); alone: look {4}, bleed fix {5}, dithering {6} ms; bleed fix with the look on {7} ms{8}",
+            stamp, ms[0], ms[7], d1(ms[7] - ms[0]), d1(ms[1] - ms[0]), d1(ms[2] - ms[0]), d1(ms[4] - ms[0]), d1(ms[3] - ms[1]), paused ? ", game paused" : "");
+        var values = string.Join(";", Sliders.Select((d, i) => d.Key + "=" + _v[i].ToString("0.#####", CultureInfo.InvariantCulture))
+            .Concat(ToggleKeys.Select((k, i) => k + "=" + (_b[i] ? "1" : "0")))
+            .Concat(new[] { "look_on=" + (_active ? "1" : "0"), "game_paused=" + (paused ? "1" : "0"), "fix_available=" + (FixAvailable ? "1" : "0") }).ToArray());
+        string record = stamp + "," + Csv(BuildStamp) + "," + Screen.width + "x" + Screen.height + "," + Screen.currentResolution.refreshRateRatio.value.ToString("0.##", CultureInfo.InvariantCulture)
+            + "," + _vsyncBefore + "," + _targetFpsBefore + "," + (paused ? "1" : "0") + "," + string.Join(",", ms.Select(f2).ToArray())
+            + "," + string.Join(";", _bulkTimes.Select(t => t.Count.ToString(CultureInfo.InvariantCulture)).ToArray()) + "," + values + "," + Csv(summary);
+        Log("cost meter: " + summary);
+        try
+        {
+            string path = Path.Combine(_dir, "benchmark_bulk.csv");
+            string header = "utc,build,screen,refresh_hz,vsync_setting,fps_target_setting,game_paused," + string.Join(",", BulkStateKeys.Select(k => k + "_ms").ToArray()) + ",frames_per_state,settings,summary";
+            bool isNew = !File.Exists(path);
+            var bytes = new UTF8Encoding(false).GetBytes((isNew ? header : "") + "\n" + record);
+            using (var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read))
+            {
+                fs.Write(bytes, 0, bytes.Length);
+                fs.Flush(true);
+            }
+        }
+        catch (Exception e) { Log("bulk benchmark save failed: " + e.Message); }
     }
 
     // A field holding a comma or quote goes in quotes (the build stamp has a comma; until v0.0.34 it shifted the columns).
@@ -2413,7 +2707,7 @@ public class CadStyleRunner : MonoBehaviour
     // Append-only: a new file gets only its header, and each record writes its line break first, so a broken write can only harm itself.
     void AppendBenchmark(string record)
     {
-        const string Header = "utc,build,screen,refresh_hz,vsync_setting,fps_target_setting,look_on_ms,look_off_ms,span_ms_on_off_in_turns,span_frames,settings,summary";
+        const string Header = "utc,build,screen,refresh_hz,vsync_setting,fps_target_setting,part,part_on_ms,part_off_ms,span_ms_on_off_in_turns,span_frames,settings,summary";
         bool isNew = !File.Exists(BenchmarkPath);
         var bytes = new UTF8Encoding(false).GetBytes((isNew ? Header : "") + "\n" + record);
         using (var fs = new FileStream(BenchmarkPath, FileMode.Append, FileAccess.Write, FileShare.Read))
@@ -2750,18 +3044,9 @@ public class CadStyleRunner : MonoBehaviour
         return solid;
     }
 
-    void PreRender(Camera c)
+    // Rows 0-4: depth to distance, view size and view-to-world, for every pass that rebuilds positions from depth. Returns the far plane.
+    float CameraRows(Camera c)
     {
-        if (c != _cam || _params == null) return;
-        if (!_active)
-        {
-            // F9 off, only the dither may still run and needs its one row.
-            if (_ditherFx == null) return;
-            _params.SetPixel(17, 0, AdaptRow());
-            _params.Apply(false);
-            Shader.SetGlobalTexture("_OLParams", _params);
-            return;
-        }
         float n = c.nearClipPlane, f = c.farClipPlane;
         float x, y;
         if (SystemInfo.usesReversedZBuffer) { x = -1f + f / n; y = 1f; }
@@ -2775,6 +3060,24 @@ public class CadStyleRunner : MonoBehaviour
         _params.SetPixel(2, 0, (Color)v2w.GetRow(0));
         _params.SetPixel(3, 0, (Color)v2w.GetRow(1));
         _params.SetPixel(4, 0, (Color)v2w.GetRow(2));
+        return f;
+    }
+
+    void PreRender(Camera c)
+    {
+        if (c != _cam || _params == null) return;
+        if (!_active)
+        {
+            // F9 off: only the dither (row 17) and the bleed fix's own flat normals pass (camera rows 0-4, fix row 16) may still run.
+            bool rows = _flatBuffer != null;
+            if (_ditherFx == null && !rows) return;
+            if (rows) { CameraRows(c); _params.SetPixel(16, 0, new Color(LampFixLimit, 0f, LampCellTest, 0f)); }
+            _params.SetPixel(17, 0, AdaptRow());
+            _params.Apply(false);
+            Shader.SetGlobalTexture("_OLParams", _params);
+            return;
+        }
+        float f = CameraRows(c);
         const float fadeStart = LineFadeStart, fadeEnd = LineFadeEnd;
         _params.SetPixel(5, 0, new Color(Mathf.Cos(V(S.CreaseAngle) * Mathf.Deg2Rad), V(S.DepthStep), Mathf.Max(V(S.ColorStep) * (1f - V(S.KeepColorLines) * _fadeBaked), Mathf.Min(V(S.ColorStep), FadeSmallestColorStep)), V(S.LineOpacity)));
         _params.SetPixel(6, 0, new Color(V(S.LineWidth), fadeStart, fadeEnd, f * 0.98f));
@@ -2856,6 +3159,7 @@ public class CadStyleRunner : MonoBehaviour
             int opens;
             if (readActive && key == "window_opens" && int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out opens) && opens >= 0 && opens < WindowOpensLabels.Length) _windowOpens = opens;
             if (readActive && key == "pause_on_open") _pauseOnOpen = val == "1";
+            if (readActive && key == "tips_on") _tipsOn = val == "1";
             if (readActive && key == "status_seen") _statusSeen = val;
         }
     }
@@ -2959,7 +3263,7 @@ public class CadStyleRunner : MonoBehaviour
 
     // ---- Presets: click loads, hold 1 s saves; with Delete armed, holding 3 s deletes. -----------------------------------
     const float DeleteSeconds = 3f;
-    bool _layoutUndo, _layoutMeasured;
+    bool _layoutUndo, _layoutMeasured, _layoutCanMeasure;
     static readonly string Dot = ((char)0xB7).ToString();   // middle dot, kept out of the source as a character
     bool _deleteArmed;
     int _deletedSlot = -1;
@@ -3007,6 +3311,7 @@ public class CadStyleRunner : MonoBehaviour
         if (e.type == EventType.Layout) _layoutUndo = _undoKind != UndoKind.None;
         bool showUndo = _layoutUndo;
         var row = GUILayoutUtility.GetRect(10f, 36f, GUILayout.ExpandWidth(true));
+        Tip(row, "presets");
         const float gap = 4f;
         float defaultsWidth = (row.width - gap * 4f) * 1.4f / 5.4f, slotWidth = (row.width - gap * 4f - defaultsWidth) / 4f;
         float holdTime = _deleteArmed ? DeleteSeconds : HoldSeconds;
@@ -3159,10 +3464,10 @@ public class CadStyleRunner : MonoBehaviour
         if (_features.Count > 0) return;
         AddFeature("pause", "PAUSE", "The game is paused while this window is open (switch in the title bar).");
         AddFeature("look", "CAD LOOK", "Lines, flat facets, light bands, glow.");
-        AddFeature("lampfix", "LAMP/SUN LIGHT FIX", "Stops lamp and sun light from bleeding through walls.");
+        AddFeature("lampfix", "BLEED FIX", "Stops lamp and sun light from bleeding through walls, with the look on or off.");
         AddFeature("terrain", "SOLID-COLOR TERRAIN", "Ground and rock in flat colors.", true);
         AddFeature("effects", "GAME EFFECTS", "Bloom and volumetric light are switched as you set them.", true);
-        AddFeature("bluenoise", "BLUE NOISE", "Fine noise that hides color steps in dark gradients.");
+        AddFeature("bluenoise", "DITHERING", "Fine blue noise that hides color steps in dark gradients, with the look on or off.");
         AddFeature("screen", "SCREEN LIGHTS", "Computers light the room in front of their screen.");
         AddFeature("screenglow", "OTHER SCREENS", "Other devices with a screen light the room in its color.");
         AddFeature("machine", "FABRICATOR LIGHTS", "Fabricators light the room at their front.");
@@ -3199,7 +3504,7 @@ public class CadStyleRunner : MonoBehaviour
     {
         DefineFeatures();
         SetFeature("look", _mat != null, _lookWhy);
-        SetFeature("lampfix", _lampShader != null, _lampWhy ?? (_mat == null ? "It needs the CAD look's shader files, which did not load. The game's own lighting is used." : "The lamp fix shader did not load. The game's own lighting is used."));
+        SetFeature("lampfix", FixAvailable, _lampWhy ?? (_mat == null ? "It needs the CAD look's shader files, which did not load. The game's own lighting is used." : "The lamp fix shader did not load. The game's own lighting is used."));
         var broken = PanelCursorGuard.PatchReport.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries).Where(p => !p.EndsWith(" ok")).ToArray();
         SetFeature("mouse", broken.Length == 0, "Not found or failed in the game: " + string.Join(", ", broken) + ". Clicks on this window may also reach the game.");
         var world = AccessTools.TypeByName("WorldManager");
@@ -3271,6 +3576,7 @@ public class CadStyleRunner : MonoBehaviour
     float _gameStateSince;
     bool _autoOpenDone;
     bool _pauseOnOpen = true;
+    bool _tipsOn = true;
     int _windowOpens;   // 0 each start, 1 on change, 2 never
     string _statusSeen = "";
     bool _notToday;
@@ -3622,7 +3928,7 @@ public class CadStyleRunner : MonoBehaviour
     // ---- The window: tabs General, Look, Lights, Advanced, Status (his design, 2026-11-08). -----------------------------
     const float PanelWidth = 440f;
     const int PanelWindowId = 0x4F4C4F4B;
-    const string Version = "1.0.1";
+    const string Version = "1.0.2";
     bool _panelOpen;
     bool _panelPlaced;
     CursorLockMode _lockBefore;
@@ -3631,6 +3937,7 @@ public class CadStyleRunner : MonoBehaviour
     float _panelScale = 1f;
     int _tab;
     static readonly string[] TabNames = { "GENERAL", "LOOK", "LIGHTS", "ADVANCED", "STATUS" };
+    static readonly string[] TabTipKeys = { "tab_general", "tab_look", "tab_lights", "tab_advanced", "tab_status" };
     readonly Vector2[] _tabScroll = new Vector2[5];   // each tab keeps its place for this game run
 
     void SetPanelOpen(bool open)
@@ -3936,6 +4243,9 @@ public class CadStyleRunner : MonoBehaviour
         _sLabelBox = BoxText(13, CText, false, TextAnchor.MiddleLeft);
         _sSmallBox = BoxText(11, CMuted, false, TextAnchor.MiddleLeft);
         _sSmallRedBox = BoxText(11, CBadText, false, TextAnchor.MiddleLeft);
+        _sMainLabel = BoxText(12, CText, false, TextAnchor.MiddleCenter);
+        _sMainCost = BoxText(10, CMuted, false, TextAnchor.MiddleCenter);
+        _sMainCostBad = BoxText(10, CBadText, false, TextAnchor.MiddleCenter);
         _sGroupBox = BoxText(11, Hex("#b9bcc2"), false, TextAnchor.MiddleLeft);
         _sGroupBadBox = BoxText(11, CBadText, false, TextAnchor.MiddleLeft);
         // The scrollbar in the window's own look: a thin dark track, a gray thumb, no arrow buttons.
@@ -3989,9 +4299,10 @@ public class CadStyleRunner : MonoBehaviour
     }
 
     // A labelled switch row; a marker in front when the feature behind it is not available (or still to be checked).
-    bool SwitchRow(string label, bool on, int state = 1)
+    bool SwitchRow(string label, bool on, int state = 1, string tip = null)
     {
         var row = GUILayoutUtility.GetRect(10f, 32f, GUILayout.ExpandWidth(true));
+        Tip(row, tip);
         float x = row.x;
         if (state != 1)
         {
@@ -4002,12 +4313,14 @@ public class CadStyleRunner : MonoBehaviour
         return Switch(new Rect(row.xMax - 60f, row.y + 4f, 60f, 24f), on);
     }
 
-    void ToggleSwitch(B which, string label, int state = 1)
+    // inverted: the switch shows ON when the stored value is false (the stored keys hold_bloom, hold_volumetric, lamp_spots_off say "off").
+    void ToggleSwitch(B which, string label, int state = 1, bool inverted = false)
     {
         int i = (int)which;
-        bool now = SwitchRow(label, _b[i], state);
-        if (now == _b[i]) return;
-        _b[i] = now;
+        bool shown = inverted ? !_b[i] : _b[i];
+        bool now = SwitchRow(label, shown, state, ToggleKeys[i]);
+        if (now == shown) return;
+        _b[i] = inverted ? !now : now;
         ClearUndo();
         MarkChanged();
         ApplyToggles();
@@ -4041,6 +4354,7 @@ public class CadStyleRunner : MonoBehaviour
         int i = (int)which;
         var d = Sliders[i];
         var r = GUILayoutUtility.GetRect(10f, 28f, GUILayout.ExpandWidth(true));
+        Tip(r, d.Key);
         GUILayout.Space(3f);
         int id = GUIUtility.GetControlID(FocusType.Passive);
         var e = Event.current;
@@ -4219,18 +4533,85 @@ public class CadStyleRunner : MonoBehaviour
         GUILayout.BeginHorizontal();
         GUILayout.Label("CHANGE KEYS IN KEYS.TXT", _sSmall, GUILayout.Height(32f));
         if (GUILayout.Button("OPEN MOD FOLDER", _sButton, GUILayout.Width(170f), GUILayout.Height(32f))) OpenModFolder();
+        Tip(GUILayoutUtility.GetLastRect(), "open_folder");
         GUILayout.EndHorizontal();
         Section("THIS WINDOW OPENS BY ITSELF AT THE MAIN MENU");
         int opens = Choice(WindowOpensLabels, _windowOpens);
+        Tip(GUILayoutUtility.GetLastRect(), "window_opens");
         if (opens != _windowOpens) { _windowOpens = opens; MarkChanged(); }
         GUILayout.Space(6f);
         int today = Choice(NotTodayLabels, _notToday ? 1 : 0, true);
+        Tip(GUILayoutUtility.GetLastRect(), "not_today");
         if ((today == 1) != _notToday) SetNotToday(today == 1);
         Section("PRESETS");
         PresetRow();
         GUILayout.Space(18f);
         GUILayout.Label(BuildStamp, _sSmall);
+        // His design 2026-11-16: an update check that runs only when clicked, next to the version, where nobody misses it.
+        if (Event.current.type == EventType.Layout) { _layoutUpdateLink = _updateNewer; _layoutUpdateText = _updateText; }
+        if (GUILayout.Button(_updateReq != null ? "CHECKING GITHUB..." : "CHECK FOR UPDATES", _sButton, GUILayout.Width(220f), GUILayout.Height(32f))) StartUpdateCheck();
+        Tip(GUILayoutUtility.GetLastRect(), "check_updates");
+        if (_layoutUpdateText != null) GUILayout.Label(_layoutUpdateText, _layoutUpdateLink ? _sKey : _updateFailed ? _sSmallRed : _sSmall);
+        if (_layoutUpdateLink) LinkLine("Open the download page on GitHub", ReleasesUrl);
+        GUILayout.Space(10f);
         LinkLine(ChannelText, ChannelUrl);
+    }
+
+    // ---- Update check: asks GitHub for the newest release, only when the button is clicked. Nothing else is sent or saved. ----
+    const string LatestReleaseApi = "https://api.github.com/repos/God-creator-of-the-universe/Gcotus-Stationeers-CAD-Style/releases/latest";
+    const string ReleasesUrl = "https://github.com/God-creator-of-the-universe/Gcotus-Stationeers-CAD-Style/releases";
+    UnityEngine.Networking.UnityWebRequest _updateReq;
+    string _updateText, _layoutUpdateText;
+    bool _updateNewer, _updateFailed, _layoutUpdateLink;
+    static readonly System.Text.RegularExpressions.Regex TagName = new System.Text.RegularExpressions.Regex("\"tag_name\"\\s*:\\s*\"v?([0-9][0-9.]*)\"");
+
+    void StartUpdateCheck()
+    {
+        if (_updateReq != null) return;
+        try
+        {
+            _updateReq = UnityEngine.Networking.UnityWebRequest.Get(LatestReleaseApi);
+            _updateReq.SetRequestHeader("Accept", "application/vnd.github+json");
+            _updateReq.SetRequestHeader("User-Agent", "GcotuStationeersCADStyle-update-check");
+            _updateReq.timeout = 15;
+            _updateReq.SendWebRequest();
+            Log("update check: asking GitHub");
+        }
+        catch (Exception e) { _updateReq = null; FinishUpdateCheck(null, e.Message); }
+    }
+
+    void UpdateUpdateCheck()
+    {
+        if (_updateReq == null || !_updateReq.isDone) return;
+        var req = _updateReq;
+        _updateReq = null;
+        string error = req.result == UnityEngine.Networking.UnityWebRequest.Result.Success ? null : (req.error ?? "unknown error") + (req.responseCode > 0 ? " (HTTP " + req.responseCode + ")" : "");
+        string body = error == null ? req.downloadHandler.text : null;
+        req.Dispose();
+        FinishUpdateCheck(body, error);
+    }
+
+    void FinishUpdateCheck(string body, string error)
+    {
+        _updateNewer = false;
+        _updateFailed = true;
+        if (error == null)
+        {
+            var m = TagName.Match(body ?? "");
+            System.Version latest, mine;
+            if (!m.Success || !System.Version.TryParse(m.Groups[1].Value, out latest) || !System.Version.TryParse(Version, out mine)) error = "GitHub's answer had no version number";
+            else
+            {
+                _updateFailed = false;
+                int c = latest.CompareTo(mine);
+                _updateNewer = c > 0;
+                _updateText = c > 0 ? "V" + latest + " IS OUT. YOU HAVE V" + Version + "." : c == 0 ? "UP TO DATE: V" + Version + " IS THE NEWEST RELEASE." : "YOU HAVE V" + Version + ", NEWER THAN THE LATEST RELEASE V" + latest + ".";
+                Log("update check: latest release " + latest + ", this is " + Version);
+                return;
+            }
+        }
+        _updateText = "COULD NOT ASK GITHUB: " + error.ToUpperInvariant();
+        Log("update check failed: " + error);
     }
 
     void DrawLook()
@@ -4248,11 +4629,7 @@ public class CadStyleRunner : MonoBehaviour
         ToggleSwitch(B.AdaptOn, "EYE ADAPTATION");
         Group("SCENE", look);
         Bars(S.TextureFade, S.KeepColorLines);
-        ToggleSwitch(B.DitherOn, "BLUE NOISE", StateOf("bluenoise"));
         ToggleSwitch(B.FlatTerrain, "SOLID-COLOR TERRAIN", StateOf("terrain"));
-        int fix = StateOf("lampfix");
-        Group("LAMP/SUN LIGHT FIX", fix);
-        GUILayout.Label(fix == 1 ? "WORKS BY ITSELF, NO SETTINGS" : "NOT AVAILABLE, SEE STATUS", fix == 1 ? _sSmall : _sSmallRed);
     }
 
     void DrawLights()
@@ -4292,20 +4669,37 @@ public class CadStyleRunner : MonoBehaviour
         if (Event.current.type == EventType.Layout) _layoutMeasured = _b[(int)B.AdaptOn] && V(S.AdaptGamma) > 0f && _lines != null;
         if (_layoutMeasured)
             GUILayout.Label("MEASURED LIGHT " + (_lines == null || _lines.MeasuredLight < 0f ? "..." : _lines.MeasuredLight.ToString("0.00", CultureInfo.InvariantCulture)) + ", GAMMA " + _adaptGamma.ToString("0.00", CultureInfo.InvariantCulture), _sSmall);
-        Group("BLUE NOISE", StateOf("bluenoise"));
+        Group("DITHERING", StateOf("bluenoise"));
         Bars(S.Dither);
         Group("FADED TEXTURE COLORS", look);
         GUILayout.Label(V(S.TextureFade) > 0f ? "FOR TEXTURES FADED BY TEXTURE FADE" : "WORK WITH TEXTURE FADE ABOVE 0 (LOOK TAB)", _sSmall);
         Bars(S.GradeBlack, S.GradeWhite, S.GradeGamma, S.GradeSaturation, S.GradeKeep, S.GradeKeepG, S.GradeKeepB);
         Group("GAME EFFECTS", StateOf("effects"));
-        ToggleSwitch(B.HoldBloom, "BLOOM OFF");
-        ToggleSwitch(B.HoldVolumetric, "VOLUMETRIC LIGHT OFF");
-        ToggleSwitch(B.LampSpotsOff, "LAMP SPOTS OFF");
+        // Shown the plain way round, no double negation (his call 2026-11-16); the saved keys still say what the mod holds off.
+        ToggleSwitch(B.HoldBloom, "BLOOM", 1, true);
+        ToggleSwitch(B.HoldVolumetric, "VOLUMETRIC LIGHT", 1, true);
+        ToggleSwitch(B.LampSpotsOff, "LAMP SPOTS", 1, true);
         Section("MOD COST");
-        string measure = _measureSpan >= 0 ? "MEASURING, STAND STILL... (" + (_measureSpan + 1) + "/" + MeasureSpans + ")" : "MEASURE (18 S, LOOK FLIPS ON AND OFF)";
-        if (_active || _measureSpan >= 0) { if (GUILayout.Button(measure, _sButton, GUILayout.Height(32f))) StartMeasure(); }
-        else GUILayout.Label("TURN THE LOOK ON TO MEASURE", _sSmall, GUILayout.Height(32f));
+        if (Event.current.type == EventType.Layout) _layoutCanMeasure = _measureSpan >= 0 || PartsToMeasure().Count > 0;
+        string measure;
+        if (_measureSpan >= 0) measure = "MEASURING " + PartLabels[_measureParts[_measurePart]] + ", STAND STILL... (" + (_measureSpan + 1) + "/" + MeasureSpans + ")";
+        else
+        {
+            var parts = PartsToMeasure();
+            measure = "MEASURE " + string.Join(", ", parts.Select(i => PartLabels[i]).ToArray()) + " (" + (parts.Count * (int)((MeasureSettle + MeasureSample) * MeasureSpans)) + " S)";
+        }
+        if (_layoutCanMeasure) { if (GUILayout.Button(measure, _sButton, GUILayout.Height(32f))) StartMeasure(); }
+        else GUILayout.Label("TURN ON LOOK, BLEED FIX OR DITHERING TO MEASURE", _sSmall, GUILayout.Height(32f));
+        Tip(GUILayoutUtility.GetLastRect(), "measure");
+        GUILayout.Space(6f);
+        string bulk = _bulkStep >= 0
+            ? "MEASURING BULK " + (_bulkStep + 1) + "/" + (8 * BulkRounds) + ", STAND STILL"
+            : "MEASURE BULK (ALL 8 STATES, " + (int)(8 * BulkRounds * (BulkSettle + BulkSample)) + " S)";
+        if (GUILayout.Button(bulk, _sButton, GUILayout.Height(32f))) StartBulk();
+        Tip(GUILayoutUtility.GetLastRect(), "measure_bulk");
         GUILayout.Space(8f);
+        foreach (var line in _bulkLines) GUILayout.Label(line, _sSmall);
+        if (_bulkLines.Count > 0) GUILayout.Space(8f);
         foreach (var result in _measureResults) { GUILayout.Label(result, _sHint); GUILayout.Space(4f); }
     }
 
@@ -4344,13 +4738,11 @@ public class CadStyleRunner : MonoBehaviour
         var ver = new GUIContent("V" + Version);
         float verWidth = _sSmall.CalcSize(ver).x;
         GUI.Label(new Rect(x, r.y + 1f, verWidth, r.height), ver, _sSmallBox);
-        x += verWidth + 10f;
-        bool look = Switch(new Rect(x, cy - 12f, 60f, 24f), _active);
-        if (look != _active) SetActive(look);
-        var close = new Rect(r.xMax - 6f - 100f, cy - 15f, 100f, 30f);
+        // His design 2026-11-16 (H1): the look switch moved to the main row below, TIPS took its room, CLOSE became a square X.
+        var close = new Rect(r.xMax - 6f - 34f, cy - 15f, 34f, 30f);
         bool closing = GUI.Button(close, GUIContent.none, _sButton);
-        GUI.Label(new Rect(close.x + 12f, close.y, 60f, close.height), "CLOSE", _sLabelBox);
-        GUI.Label(new Rect(close.xMax - 30f, close.y - 1f, 24f, close.height), "X", _sBigX);
+        GUI.Label(new Rect(close.x, close.y - 1f, close.width, close.height), "X", _sBigX);
+        Tip(close, "close");
         var pauseSwitch = new Rect(close.x - 10f - 60f, cy - 12f, 60f, 24f);
         bool pause = Switch(pauseSwitch, _pauseOnOpen);
         if (pause != _pauseOnOpen)
@@ -4363,8 +4755,267 @@ public class CadStyleRunner : MonoBehaviour
         bool noPause = _pauseOnOpen && InWorld && !_pausedByUs;
         var label = new GUIContent(noPause ? "NOT PAUSED" : "PAUSE");
         float labelWidth = _sSmall.CalcSize(label).x;
-        GUI.Label(new Rect(pauseSwitch.x - 8f - labelWidth, r.y, labelWidth, r.height), label, noPause ? _sSmallRedBox : _sSmallBox);
+        var pauseLabel = new Rect(pauseSwitch.x - 8f - labelWidth, r.y, labelWidth, r.height);
+        GUI.Label(pauseLabel, label, noPause ? _sSmallRedBox : _sSmallBox);
+        Tip(new Rect(pauseLabel.x, cy - 12f, pauseSwitch.xMax - pauseLabel.x, 24f), "pause");
+        var tipsSwitch = new Rect(pauseLabel.x - 14f - 60f, cy - 12f, 60f, 24f);
+        bool tips = Switch(tipsSwitch, _tipsOn);
+        if (tips != _tipsOn) { _tipsOn = tips; MarkChanged(); }
+        var tipsLabel = new GUIContent("TIPS");
+        float tipsWidth = _sSmall.CalcSize(tipsLabel).x;
+        GUI.Label(new Rect(tipsSwitch.x - 8f - tipsWidth, r.y, tipsWidth, r.height), tipsLabel, _sSmallBox);
+        Tip(new Rect(tipsSwitch.x - 8f - tipsWidth, cy - 12f, tipsWidth + 68f, 24f), "tips");
         if (closing) SetPanelOpen(false);
+    }
+
+    // ---- The main row (his design R2, 2026-11-16): the three parts that work on their own, each with its last measured cost. ----
+    static readonly Color CMainRow = Hex("#16212d");
+    Texture2D _txMainRow;
+    const float MainRowHeight = 66f;
+
+    void DrawMainRow(Rect r)
+    {
+        if (_txMainRow == null) _txMainRow = Fill(CMainRow);
+        if (Event.current.type == EventType.Repaint) GUI.DrawTexture(r, _txMainRow);
+        float w = (r.width - 24f) / 3f;
+        for (int i = 0; i < 3; i++)
+        {
+            var col = new Rect(r.x + 12f + i * w, r.y, w, r.height);
+            int state = StateOf(PartFeature[i]);
+            bool on = PartOn(i);
+            GUI.Label(new Rect(col.x, col.y + 5f, col.width, 16f), PartLabels[i], _sMainLabel);
+            bool now = Switch(new Rect(col.center.x - 30f, col.y + 22f, 60f, 24f), on);
+            string cost = state == 0 ? "NOT AVAILABLE" : _partCost[i] ?? "NOT YET MEASURED";
+            GUI.Label(new Rect(col.x, col.y + 47f, col.width, 16f), cost, state == 0 ? _sMainCostBad : _sMainCost);
+            Tip(col, PartTips[i]);
+            if (now != on && !Measuring) SetPart(i, now);
+        }
+    }
+
+    // ---- Tooltips (his design T2, 2026-11-16): no delay, the box follows the pointer, left-below it, left-above when too low,
+    // right of it when there is no room on the left. Drawn in a window of its own in front of the panel; it never sits under the
+    // pointer, so it never takes a click. The hovered control is found in the panel's repaint and shown from the next frame.
+    string _tipKey, _tipNext;
+    bool _inScroll, _mouseInView;
+    const int TipWindowId = PanelWindowId + 1;
+    const float TipWidth = 360f, TipLabelWidth = 58f, TipPad = 10f;
+    GUIStyle _sTipHead, _sTipLabel, _sTipText;
+    Texture2D _txTipBack, _txTipEdge;
+    static readonly string[] TipRowNames = { "WHAT", "MATH", "EXPECT", "COST" };
+
+    void Tip(Rect r, string key)
+    {
+        if (key == null || !_tipsOn || Measuring || Event.current.type != EventType.Repaint) return;
+        if (_inScroll && !_mouseInView) return;
+        if (r.Contains(Event.current.mousePosition)) _tipNext = key;
+    }
+
+    void DrawTipBox(float screenW, float screenH)
+    {
+        string[] t;
+        // No tooltips while MEASURE or MEASURE BULK runs (his call): the test changes the window under a still pointer.
+        if (!_tipsOn || Measuring || _tipKey == null || !TipTexts.TryGetValue(_tipKey, out t)) return;
+        if (_sTipHead == null)
+        {
+            _sTipHead = BoxText(12, CText, true, TextAnchor.MiddleLeft);
+            _sTipHead.padding = new RectOffset((int)TipPad, (int)TipPad, 0, 0);
+            _sTipLabel = Text(11, CAccent, false, TextAnchor.UpperLeft);
+            _sTipLabel.padding = new RectOffset(0, 0, 1, 0);
+            _sTipText = Text(12, CText, false, TextAnchor.UpperLeft, true);
+            _sTipText.padding = new RectOffset(0, 0, 0, 0);
+            _txTipBack = Fill(Hex("#1b1d21"));
+            _txTipEdge = Fill(Hex("#3a3e45"));
+        }
+        // Laid out once per tooltip and kept: line breaks are fixed here, so the text cannot wrap differently as the box moves
+        // (build 46 let IMGUI wrap at every fractional position, and the lines jumped, his report 2026-11-16).
+        if (_tipLayout == null || _tipLayout.Key != _tipKey) _tipLayout = LayOutTip(_tipKey, t);
+        float h = _tipLayout.Height;
+        var m = Event.current.mousePosition;
+        const float gap = 14f;
+        float left = m.x - gap - TipWidth, top = m.y + gap;
+        if (left < 4f) left = m.x + gap + 6f;
+        if (top + h > screenH - 4f) top = m.y - gap - h;
+        top = Mathf.Max(4f, top);
+        // Whole screen pixels, so the glyphs never land between pixels while the box follows the pointer.
+        left = Mathf.Round(left * _panelScale) / _panelScale;
+        top = Mathf.Round(top * _panelScale) / _panelScale;
+        if (_drawTip == null) _drawTip = DrawTipWindow;
+        GUI.Window(TipWindowId, new Rect(left, top, TipWidth, h), _drawTip, GUIContent.none, GUIStyle.none);
+        GUI.BringWindowToFront(TipWindowId);
+    }
+
+    class TipLayout
+    {
+        public string Key, Title;
+        public string[][] Lines = new string[4][];
+        public float Height, LineHeight;
+    }
+
+    TipLayout _tipLayout;
+    GUI.WindowFunction _drawTip;
+    GUIStyle _sTipLine;
+
+    TipLayout LayOutTip(string key, string[] t)
+    {
+        if (_sTipLine == null)
+        {
+            _sTipLine = Text(12, CText, false, TextAnchor.UpperLeft, false);
+            _sTipLine.padding = new RectOffset(0, 0, 0, 0);
+        }
+        float textWidth = TipWidth - TipPad * 2f - TipLabelWidth - 10f;
+        var lay = new TipLayout { Key = key, Title = t[0], LineHeight = Mathf.Ceil(_sTipLine.CalcSize(new GUIContent("Ag")).y) };
+        float h = 26f + TipPad;
+        for (int i = 0; i < 4; i++)
+        {
+            string text = t[i + 1];
+            if (string.IsNullOrEmpty(text)) continue;
+            var lines = new List<string>();
+            string line = "";
+            foreach (var word in text.Split(' '))
+            {
+                string tryLine = line.Length == 0 ? word : line + " " + word;
+                if (line.Length > 0 && _sTipLine.CalcSize(new GUIContent(tryLine)).x > textWidth) { lines.Add(line); line = word; }
+                else line = tryLine;
+            }
+            if (line.Length > 0) lines.Add(line);
+            lay.Lines[i] = lines.ToArray();
+            h += lines.Count * lay.LineHeight + 5f;
+        }
+        lay.Height = Mathf.Ceil(h);
+        return lay;
+    }
+
+    void DrawTipWindow(int id)
+    {
+        var lay = _tipLayout;
+        if (Event.current.type != EventType.Repaint || lay == null) return;
+        float h = lay.Height;
+        GUI.DrawTexture(new Rect(0f, 0f, TipWidth, h), _txTipEdge);
+        GUI.DrawTexture(new Rect(1f, 1f, TipWidth - 2f, h - 2f), _txTipBack);
+        GUI.DrawTexture(new Rect(1f, 1f, TipWidth - 2f, 25f), _txFill);
+        GUI.Label(new Rect(1f, 1f, TipWidth - 2f, 25f), lay.Title, _sTipHead);
+        float y = 26f + TipPad * 0.6f, x = TipPad + TipLabelWidth + 10f, w = TipWidth - x - TipPad;
+        for (int i = 0; i < 4; i++)
+        {
+            var lines = lay.Lines[i];
+            if (lines == null) continue;
+            GUI.Label(new Rect(TipPad, y, TipLabelWidth, 16f), TipRowNames[i], _sTipLabel);
+            foreach (var line in lines) { GUI.Label(new Rect(x, y, w + 40f, lay.LineHeight), line, _sTipLine); y += lay.LineHeight; }
+            y += 5f;
+        }
+    }
+
+    // Title, WHAT, MATH, EXPECT, COST; empty lines are left out. Keys: slider and switch keys as saved, plus the window's own controls.
+    static readonly Dictionary<string, string[]> TipTexts = new Dictionary<string, string[]>
+    {
+        { "close", new[] { "CLOSE", "Closes this window.", "", "Escape and F11 close it too (keys.txt can change them).", "" } },
+        { "pause", new[] { "PAUSE", "Pauses the game while this window is open.", "", "A window carried from the main menu into a world does not pause it, so the capsule landing is not cut short. The label then says NOT PAUSED.", "" } },
+        { "tips", new[] { "TIPS", "Shows these boxes while you point at a control.", "", "Off: no boxes. Saved with your settings.", "" } },
+        { "look", new[] { "LOOK", "The CAD look: outlines, flat facets, light bands, glow, solid-color ground, and the mod's device, fire and flashlight lights.", "", "Off: the game's own picture, apart from BLEED FIX and DITHERING when they are on. F9 flips it too.", "Measure it with MEASURE on the Advanced tab." } },
+        { "fix", new[] { "BLEED FIX (EXPENSIVE!)", "Stops lamp and sun light from shining through walls. Works with the look on or off.", "Lamp shadow offset 0.004 m instead of the game's 0.05 to 0.1; lamp shadow maps 1280 px per cube face instead of automatic; its own lamp shader ignores shadow map cells lying on the lit surface's own plane (within 0.001 m). Sun shadow offset 0.05.", "Off: exactly the game's own lighting.", "About 1 ms per frame in a base full of lamps, 0.4 ms in a big station (4K, measured 2026-11-16)." } },
+        { "dither_on", new[] { "DITHERING", "Adds very fine blue noise to the final image, so smooth dark gradients show no color steps. Works with the look on or off.", "", "Strength: Advanced tab, DITHERING.", "" } },
+        // Written from the code 2026-11-16 (sliders, switches, General controls, tabs); reviewed by him on a page before release.
+        { "line_width", new[] { "LINES: WIDTH (PIXELS)", "How thick the black outlines are. 0 turns the lines off.", "0 to 8 px, default 3. The 1 px edge mask is grown to this width with a soft round edge. Below 1 px the line also gets fainter (strength x width).", "Thicker or thinner outlines on every edge. The width is in screen pixels, so far edges get the same width as near ones. At 0 no lines are drawn.", "Per screen pixel the draw pass reads (2r+1) x (2r+1) mask pixels, r = ceil(width/2 + 0.5) - 1: 9 reads at width 3, 81 at width 8. At 0 the line passes are skipped." } },
+        { "line_opacity", new[] { "LINES: OPACITY", "How dark the outlines are. 1 is solid black, 0 is invisible.", "0 to 1, default 0.9. Line alpha = edge coverage x this value.", "Lower values let the surface show through the lines. At 0 no lines are drawn.", "None by itself. At 0 the line passes are skipped, which saves their cost." } },
+        { "smooth_forms", new[] { "SMOOTH FORMS", "Blends between hard flat facets and the game's own smooth surface normals. Lamp light and facet shading follow this.", "0 to 1, default 0.73. Normal = blend(flat normal from depth, game normal, value). 0 = every triangle flat, 1 = the game's own normals.", "Low: faceted, polygon look. High: round shapes look round again. Lines are not affected, they always use the flat normals.", "None extra. It is part of a pass that always runs with the look on." } },
+        { "facet_shade", new[] { "FACET SHADING", "Shades each surface by the way it faces, as if lit from one fixed direction. Flat faces get distinct brightness, like in a CAD view.", "0 to 1, default 0.85. Color x max(0, 1 + value x cos(angle to the shading direction)). Facing it: up to x(1 + value). Facing away: x(1 - value).", "Higher gives stronger contrast between faces. The direction is set under FACET SHADING DIRECTION (Advanced tab). Follows SMOOTH FORMS. The sky is left alone.", "One full-screen copy and pass, shared with POSTERIZE. Skipped when both are 0." } },
+        { "ambient_keep", new[] { "AMBIENT LIGHT", "How much of the game's ambient light and self-lit (emission) light stays. Lamp light and reflections are added after this.", "0 to 1, default 1. Ambient and emission in the frame are multiplied by this value.", "Lower makes areas without a lamp darker and dims self-lit surfaces. Lamp light is not changed. GLOW is taken before this, so it is not dimmed.", "One simple full-screen multiply that always runs with the look on." } },
+        { "posterize", new[] { "POSTERIZE", "Snaps the light on surfaces to a few brightness steps, like cel shading. It works on the light level, so paint colors stay as they are.", "0 to 1, default 0.42. Blend from normal light (0) to stepped light (1). Light level = lit pixel brightness / surface color brightness.", "Higher gives harder steps. BANDS, FULL-LIGHT LEVEL and DARKEST BAND set the steps. Light above 3x FULL-LIGHT LEVEL and the sky are left alone.", "Shares one full-screen copy and pass with FACET SHADING. Skipped when both are 0." } },
+        { "bands", new[] { "LIGHT BANDS: BANDS", "How many brightness steps POSTERIZE uses.", "2 to 8, default 4. The light is cut into this many even steps on a gamma 2.2 scale, from DARKEST BAND up to FULL-LIGHT LEVEL.", "Fewer bands: bold, cartoon-like steps. More bands: smoother light. Only works with POSTERIZE above 0.", "None. Same work at any value." } },
+        { "band_top", new[] { "FULL-LIGHT LEVEL", "The light level that counts as full light, the top band.", "0.1 to 4, default 1.5. Light levels from this up to 3x this are pulled down to it. Brighter than 3x stays as it is.", "Lower: more surfaces reach the top band, but the top band itself is dimmer. Higher: more surfaces fall into the darker bands. Only works with POSTERIZE above 0.", "None." } },
+        { "band_floor", new[] { "DARKEST BAND", "How bright the lowest band is, as a share of full light.", "0 to 1, default 0.13. Band brightness = FULL-LIGHT LEVEL x (floor + (1 - floor) x step)^2.2, step 0 to 1. Lowest band = FULL-LIGHT LEVEL x floor^2.2.", "Higher lifts dim shadows up to this level, so dark corners stay readable. Pure black stays black. At 0 the lowest band is black. Only works with POSTERIZE above 0.", "None." } },
+        { "glow_strength", new[] { "GLOW: STRENGTH", "Soft glow around lamps, screens and other self-lit parts. It is taken from their own light before lighting, so a wall lit by a lamp does not glow.", "0 to 2, default 0.05, finer at the low end (value = 2 x position^4). Glow = blurred light x 4 x value / sum of level weights. 0.1 is subtracted from the light first.", "Higher gives brighter halos. The glow is drawn over the lines. At 0 the glow is off and its buffers are not built.", "At 0: none. Above 0: a full-size copy of the self-lit light, a half-size extract, the blur levels (see PASSES) and one full-screen add." } },
+        { "glow_radius", new[] { "GLOW: RADIUS", "How far the glow spreads around a light.", "0 to 3, default 1.5. Each coarser blur level is added with weight 0.35 + 0.75 x radius. Above radius 1 the lamp's core keeps its strength and only the wide light grows.", "Low: tight halo close to the light. High: wide, soft haze. Only works with GLOW: STRENGTH above 0.", "None. Same passes at any value." } },
+        { "glow_passes", new[] { "GLOW: PASSES", "How many blur levels the glow uses. More levels let it reach farther.", "2 to 16, default 6. The first level is a quarter of the screen's width and height, each next level half the size of the one before. Past 5 levels the brightness sum stays fixed.", "More passes: the glow reaches wider while the core stays as bright. Fewer: shorter glow. Only works with GLOW: STRENGTH above 0.", "Each pass adds one shrink and one grow step, each at half the size of the level before, so every extra pass costs less than the one before." } },
+        { "glow_color", new[] { "COLORED GLOW", "Whether the glow keeps the color of the light. 0 gives white glow from white light only. 1 gives glow in the light's own color.", "0 to 1, default 1. Glow source = blend(weakest color channel, strongest channel, value) minus 0.1. The glow's color blends from white to the light's color by the same value.", "At 0 strongly colored lamps and screens glow little or not at all, white lights still glow. COLOR BOOST R, G and B need this above 0.", "None." } },
+        { "glow_boost_r", new[] { "GLOW COLOR: COLOR BOOST R", "Makes the red part of colored glow stronger or weaker. White light is not changed.", "0 to 20, default 1.5, finer at the low end. Red glow x blend(1, value, c), c = (1 - weakest/strongest channel) x COLORED GLOW. At 1 nothing changes.", "Raise it to make red lamps and screens glow more, lower it below 1 for less. Needs COLORED GLOW and GLOW: STRENGTH above 0.", "None." } },
+        { "glow_boost_g", new[] { "GLOW COLOR: COLOR BOOST G", "Makes the green part of colored glow stronger or weaker. White light is not changed.", "0 to 20, default 1.5, finer at the low end. Green glow x blend(1, value, c), c = (1 - weakest/strongest channel) x COLORED GLOW. At 1 nothing changes.", "Raise it to make green lamps and screens glow more, lower it below 1 for less. Needs COLORED GLOW and GLOW: STRENGTH above 0.", "None." } },
+        { "glow_boost_b", new[] { "GLOW COLOR: COLOR BOOST B", "Makes the blue part of colored glow stronger or weaker. White light is not changed.", "0 to 20, default 1.5, finer at the low end. Blue glow x blend(1, value, c), c = (1 - weakest/strongest channel) x COLORED GLOW. At 1 nothing changes.", "Raise it to make blue lamps and screens glow more, lower it below 1 for less. Needs COLORED GLOW and GLOW: STRENGTH above 0.", "None." } },
+        { "texture_fade", new[] { "TEXTURE FADE", "Fades game textures to flat color for a clean drawing look. Paint palettes fade to their paint color, other textures to their own average color.", "0 to 1, default 0. Each copy is blended toward its flat color by this value. Normal map, occlusion and detail strength are scaled by 1 - value. Capped at 0.94 while KEEP COLOR LINES is above 0.", "Applies about 0.15 s after you stop moving it, then a few textures change per frame. Terrain, transparent materials and UI are not touched. Unlocks FADED TEXTURE COLORS.", "None per frame once baked. A change re-bakes all copies, 8 textures per frame. The copies use extra video memory. At 0 all copies are released." } },
+        { "keep_color_lines", new[] { "KEEP COLOR LINES", "Keeps outlines between different colors when TEXTURE FADE makes those colors more alike.", "0 to 1, default 0.64. Color step used = COLOR STEP x (1 - value x TEXTURE FADE), never below 0.006. Above 0 it also caps TEXTURE FADE at 0.94, so some color stays for the lines.", "Higher keeps more color-edge lines on faded textures. Only works with TEXTURE FADE above 0.", "None." } },
+        { "crease_angle", new[] { "CREASE ANGLE", "Draws a line where a surface bends by more than this angle.", "5 to 90 degrees, default 23. A line goes where the flat normals of two neighboring pixels differ by more than this angle.", "Lower: gentle bends get lines too, round parts get many lines. Higher: only sharp corners get lines.", "None." } },
+        { "depth_step", new[] { "DEPTH STEP", "Draws a line where one surface sits in front of another, judged by how far apart they are.", "0.001 to 0.05, default 0.013. A line goes where a neighbor pixel lies off this surface's plane by more than this x the camera distance (0.013 = 1.3 cm per meter away).", "Lower: small steps and gaps get lines too, which can get noisy. Higher: only big depth jumps. Edges against the sky always get a line.", "None." } },
+        { "color_step", new[] { "COLOR STEP", "Draws a line where the surface color changes, like the edge of a paint stripe. It uses the color without lighting, so shadows draw no lines.", "0.02 to 1, default 0.13. A line goes where any color channel (on a square-root scale) of two neighboring pixels differs by more than this.", "Lower: more lines at color edges and on detailed textures. Higher: fewer color lines, none at 1. KEEP COLOR LINES lowers it while TEXTURE FADE is on.", "None." } },
+        { "line_stability", new[] { "LINES: STABILITY", "Calms flickering lines by blending each frame's lines with the last frames, followed through camera motion.", "0 to 0.97, default 0.6. Share of the line history kept. It drops to 0 where a pixel moved 2 px or more since the last frame. Line strength is lifted by 1 + min(1, 2 x value).", "Higher: steadier lines, less shimmer, but lines react more slowly to change. History is only used where the depth still fits, so lines do not trail in the air. 0 turns it off.", "One extra full-screen pass and a screen-size history buffer (2 floats per pixel). Skipped at 0." } },
+        { "facet_azimuth", new[] { "SHADING AZIMUTH", "The compass direction the facet shading light comes from.", "0 to 360 degrees, default 0. Turns the shading direction around the vertical axis. The direction is fixed in the world, it does not turn with the camera.", "Changes which walls are bright and which are dark. No effect when SHADING HEIGHT is 90 or FACET SHADING is 0.", "None." } },
+        { "facet_elevation", new[] { "SHADING HEIGHT", "How high above the horizon the facet shading light stands.", "0 to 90 degrees, default 64. 0 = from the horizon, 90 = straight from above.", "High: floors and tops bright, ceilings dark, walls alike. Low: walls differ more and tops get less extra light. FACET SHADING sets the strength.", "None." } },
+        { "adapt_on", new[] { "EYE ADAPTATION", "Darkens the picture when you look into bright light, then brightens it again, like eyes adjusting.", "On by default. Gamma = 1 + GAMMA AT BRIGHT x measured brightness (0 to 1). Off: gamma stays 1.", "Off: the picture keeps its normal brightness everywhere. Strength and timing: Advanced tab, EYE ADAPTATION. With GAMMA AT BRIGHT at 0 this switch does nothing.", "While on: the middle of the view is measured every 6 frames without stalling the graphics card, plus one full-screen pass while the gamma is above 1." } },
+        { "adapt_gamma", new[] { "EYE ADAPTATION: GAMMA AT BRIGHT", "How strongly the picture darkens at full brightness.", "0 to 4, default 4. Target gamma = 1 + value x b, b = 0 to 1 from the measured light. Color channels up to 1 are raised to that gamma, channels above 1 stay.", "Higher: darker mid-tones when you look into bright light, while the brightest lights stay white. 0 turns eye adaptation off. MEASURED LIGHT and GAMMA show below while it runs.", "At 0 nothing is measured or drawn." } },
+        { "adapt_sensitivity", new[] { "EYE ADAPTATION: SENSITIVITY", "How easily bright light triggers the darkening.", "0.1 to 10, default 0.1, finer at the low end. b = (log2(measured light x value) + 6) / 8, clamped 0 to 1. Full effect at light x value of 4 or more, none at 1/64 or less.", "Higher: dimmer views already darken. Lower: only very bright views darken. The light is measured in the middle quarter of the view.", "None." } },
+        { "adapt_down", new[] { "EYE ADAPTATION: FADE DOWN (S)", "How fast the picture darkens when you look into bright light.", "0.01 to 3 s, default 1. Time constant: after this many seconds the gamma has moved about 63% of the way to its target. Counts real time, not game time.", "Short: quick darkening, like a squint. Long: slow, smooth darkening.", "None." } },
+        { "adapt_up", new[] { "EYE ADAPTATION: FADE UP (S)", "How fast the picture brightens again after the bright light is gone.", "0.1 to 20 s, default 3. Time constant: after this many seconds the gamma has moved about 63% of the way back. Counts real time, not game time.", "Short: quick recovery. Long: the view stays dark for a while after you look away from a light.", "None." } },
+        { "dither", new[] { "DITHERING: STRENGTH", "Adds very fine blue noise to the final picture, so smooth dark gradients show no color steps. Works with the look on or off.", "0 to 2, default 0.5. Each channel gets noise of plus or minus 0.5 x value / 255, so at 1 the noise spans one 8-bit color step.", "Higher hides color steps better but adds visible grain. 0 turns it off. Needs the main DITHERING switch on.", "One full-screen copy and pass while on. Removed at 0 or with the switch off." } },
+        { "grade_black", new[] { "FADED TEXTURE COLORS: BLACK POINT", "Darkens the dark end of faded textures. Colors at or below this level turn black.", "0 to 0.9, default 0. On a gamma 2.2 scale: c = (c - black) / (1 - white - black), clamped 0 to 1.", "Higher: more contrast, darker darks. Only works with TEXTURE FADE above 0, on color textures. BLACK 0, WHITE 0, GAMMA 1 and SATURATION 1 together skip the grading.", "None per frame. A change re-bakes all faded copies, 8 textures per frame." } },
+        { "grade_white", new[] { "FADED TEXTURE COLORS: WHITE POINT", "Brightens the bright end of faded textures. Colors at or above 1 minus this value turn white.", "0 to 0.9, default 0.23. Same rule as BLACK POINT: c = (c - black) / (1 - white - black) on a gamma 2.2 scale, clamped 0 to 1.", "Higher: brighter, more washed-out light colors. Only works with TEXTURE FADE above 0, on color textures.", "None per frame. A change re-bakes all faded copies, 8 textures per frame." } },
+        { "grade_gamma", new[] { "FADED TEXTURE COLORS: GAMMA", "Shifts the mid-tones of faded textures darker or lighter.", "0.2 to 5, default 3. c = c ^ gamma on a gamma 2.2 scale, after the black and white points. 1 changes nothing.", "Above 1: darker mid-tones. Below 1: lighter mid-tones. Only works with TEXTURE FADE above 0, on color textures.", "None per frame. A change re-bakes all faded copies, 8 textures per frame." } },
+        { "grade_saturation", new[] { "FADED TEXTURE COLORS: SATURATION", "How colorful faded textures are.", "0 to 2, default 0. 0 = gray, 1 = unchanged, 2 = twice as colorful. Colors that pass a KEEP VIVID threshold keep their own saturation.", "At the default 0 faded textures turn gray, except vivid colors kept by KEEP VIVID RED, GREEN and BLUE. Only works with TEXTURE FADE above 0, on color textures.", "None per frame. A change re-bakes all faded copies, 8 textures per frame." } },
+        { "grade_keep_r", new[] { "FADED TEXTURE COLORS: KEEP VIVID RED", "Lets strong reds keep their color when SATURATION takes color away.", "0 to 1, default 0.85. A color keeps its saturation when strongest minus weakest channel passes the threshold (soft over 0.1). The threshold mixes the R, G, B values by each channel's share. 1 = never.", "Lower: more reds and red-tinted colors stay vivid. Mixed colors use a mix, so a yellow uses red's and green's values. Only matters with SATURATION not 1 and TEXTURE FADE above 0.", "None per frame. A change re-bakes all faded copies, 8 textures per frame." } },
+        { "grade_keep_g", new[] { "FADED TEXTURE COLORS: KEEP VIVID GREEN", "Lets strong greens keep their color when SATURATION takes color away.", "0 to 1, default 0.23. A color keeps its saturation when strongest minus weakest channel passes the threshold (soft over 0.1). The threshold mixes the R, G, B values by each channel's share. 1 = never.", "Lower: more greens and green-tinted colors stay vivid. Mixed colors use a mix, so a yellow uses red's and green's values. Only matters with SATURATION not 1 and TEXTURE FADE above 0.", "None per frame. A change re-bakes all faded copies, 8 textures per frame." } },
+        { "grade_keep_b", new[] { "FADED TEXTURE COLORS: KEEP VIVID BLUE", "Lets strong blues keep their color when SATURATION takes color away.", "0 to 1, default 0. A color keeps its saturation when strongest minus weakest channel passes the threshold (soft over 0.1). The threshold mixes the R, G, B values by each channel's share. 1 = never.", "Lower: more blues and blue-tinted colors stay vivid. At the default 0 nearly any clear blue tint is kept. Only matters with SATURATION not 1 and TEXTURE FADE above 0.", "None per frame. A change re-bakes all faded copies, 8 textures per frame." } },
+        { "flat_terrain", new[] { "SOLID-COLOR TERRAIN", "Paints ground and rock in flat colors. Each terrain texture is replaced by its average color, with flat normals and plain white detail.", "", "On by default. Off: the game's own terrain textures come back. Terrain is checked again every 300 frames. Only while the look is on.", "No shader cost. While on, all materials are scanned for terrain every 300 frames." } },
+        { "hold_bloom", new[] { "BLOOM", "The game's own bloom (the camera's UltimateBloom effect) while the look is on.", "", "On (default): the game's bloom works as usual. Off: the mod switches it off while the look is on and gives it back when the look goes off. The mod's own GLOW works either way.", "Off saves the bloom's own cost (not measured)." } },
+        { "hold_volumetric", new[] { "VOLUMETRIC LIGHT", "The game's volumetric light (the camera's VolumetricLightRenderer effect) while the look is on.", "", "Off (default): the mod switches it off while the look is on and gives it back when the look goes off. On: the game draws it as usual.", "Off saves its cost (not measured)." } },
+        { "lamp_spots_off", new[] { "LAMP SPOTS", "The bright flare spots the game draws on lamps. The sun's flare is never touched.", "", "On (default): the game's spots. Off: hidden while the look is on, back when the look goes off. Lamps are checked every 120 frames, so new lamps follow soon.", "Off: a search of the scene's lens flares every 120 frames." } },
+        { "screen_lights", new[] { "SCREEN LIGHTS: ON", "Lets screens light the room in front of them. Computers get a white lamp. Other devices with a screen get a lamp in that screen's own color.", "Off removes all screen lamps. STRENGTH at 0 does the same. On by default.", "Computers: lit while switched on and powered. Other screens: lit while the screen glows. Consoles use MACHINE LIGHTS instead. Needs the look on.", "One extra light per lit screen, no shadow. Counted in the LOOK result of MEASURE." } },
+        { "screen_power", new[] { "SCREEN LIGHTS: STRENGTH", "How bright the screen lamps are.", "Computers: lamp intensity = Strength. Other screens: intensity = Strength x how bright the screen glows, at most 1. 0 to 5, default 0.5. 0 turns screen lamps off.", "The lamp sits 0.15 m in front of the screen. Needs the look on and SCREEN LIGHTS on.", "One extra light per lit screen, no shadow." } },
+        { "screen_reach", new[] { "SCREEN LIGHTS: REACH (M)", "How far the screen lamps reach.", "Lamp range = Reach. 0.1 to 20 m, default 1.3.", "The lamp's light ends at this distance. Applies to computers and to other screens. Needs the look on and SCREEN LIGHTS on.", "" } },
+        { "maker_r", new[] { "MACHINE LIGHTS: RED", "Red share of the light from fabricators, consoles and vending machines.", "Lamp color = (Red, Green, Blue) / the largest of the three. Lamp intensity = the largest of the three. 0 to 5, default 0.3. All three at 0 turns these lamps off.", "Defaults 0.3, 0.5, 0.3 give a pale green at intensity 0.5. Lit while the machine is switched on and powered. The lamp sits at its screen. Needs the look on.", "One extra light per machine, no shadow." } },
+        { "maker_g", new[] { "MACHINE LIGHTS: GREEN", "Green share of the light from fabricators, consoles and vending machines.", "Lamp color = (Red, Green, Blue) / the largest of the three. Lamp intensity = the largest of the three. 0 to 5, default 0.5. All three at 0 turns these lamps off.", "Defaults 0.3, 0.5, 0.3 give a pale green at intensity 0.5. Lit while the machine is switched on and powered. Needs the look on.", "One extra light per machine, no shadow." } },
+        { "maker_b", new[] { "MACHINE LIGHTS: BLUE", "Blue share of the light from fabricators, consoles and vending machines.", "Lamp color = (Red, Green, Blue) / the largest of the three. Lamp intensity = the largest of the three. 0 to 5, default 0.3. All three at 0 turns these lamps off.", "Defaults 0.3, 0.5, 0.3 give a pale green at intensity 0.5. Lit while the machine is switched on and powered. Needs the look on.", "One extra light per machine, no shadow." } },
+        { "maker_reach", new[] { "MACHINE LIGHTS: REACH (M)", "How far the light from fabricators, consoles and vending machines reaches.", "Lamp range = Reach. 0.1 to 20 m, default 4.", "The lamp's light ends at this distance. Needs the look on.", "" } },
+        { "battery_power", new[] { "BATTERY LIGHTS: STRENGTH", "How bright station batteries glow in the color of their charge.", "Lamp intensity = Strength. 0 to 5, default 1. 0 turns battery lamps off.", "Station battery and large station battery only. The lamp sits at the battery's center and is lit while the battery is switched on. Needs the look on.", "One extra light per battery, no shadow." } },
+        { "battery_reach", new[] { "BATTERY LIGHTS: REACH (M)", "How far the battery light reaches.", "Lamp range = Reach. 0.1 to 20 m, default 1.5.", "The lamp's light ends at this distance. Needs the look on.", "" } },
+        { "battery_bias", new[] { "BATTERY LIGHTS: SWITCH TO BARS", "Sets the battery lamp's color between its green switch light and the color of its charge bars.", "Color = green x (1 - value) + bar color x value, then brought to full brightness. 0 = always green, 1 = pure bar color. 0 to 1, default 0.7.", "Bar color by charge: red, red, orange, yellow, green, blue when full. With no bar lit the lamp is plain green. The bar colors are estimates of the game's look.", "" } },
+        { "furnace_power", new[] { "ARC FURNACE LIGHT: STRENGTH", "How bright the lamp inside the arc furnace is.", "Intensity = Strength x 0.12 when on and idle (dim green), up to Strength x 1 while smelting (orange). The shift runs at the game's own glow pace, 2 s for the full change. 0 to 10, default 3.", "Lit while the arc furnace is switched on and powered. 0 turns it off. Needs the look on.", "One extra light per arc furnace, no shadow." } },
+        { "furnace_reach", new[] { "ARC FURNACE LIGHT: REACH (M)", "How far the arc furnace light reaches.", "Lamp range = Reach. 0.1 to 20 m, default 3.", "The lamp's light ends at this distance. Needs the look on.", "" } },
+        { "flame_power", new[] { "FURNACE LIGHTS: STRENGTH", "How bright the furnace and the advanced furnace light the room with their flame.", "Lamp = the game's flame glow x 0.2 x Strength, about Strength at full flame. Advanced furnace: 1.2 x. 0 to 10, default 1.01. 0 turns these lamps off.", "Follows the game's own flame color and size, so it is dark while the flame is out. Also feeds OUTSIDE GLOW. Needs the look on.", "Five extra lights per furnace (one inside, four around it), no shadow." } },
+        { "flame_reach", new[] { "FURNACE LIGHTS: REACH (M)", "How far the lamp inside a furnace reaches.", "Inside lamp range = Reach, x 1.2 on the advanced furnace. 0.1 to 20 m, default 3.5.", "Does not change the four outside lamps. Their reach comes from the furnace's size. Needs the look on.", "" } },
+        { "flame_ring", new[] { "FURNACE LIGHTS: OUTSIDE GLOW", "Four weak lamps just outside the furnace case. They stand for the light the bright room throws back onto the furnace.", "Each outside lamp = inside lamp x Outside glow, 0.3 m out from each side at mid height. Reach = the case's largest half size + 1.1 m, x 1.2 advanced. 0 to 2, default 0.42.", "0 turns the outside lamps off. They light the case, which the lamp inside cannot reach. Needs the look on.", "Four of the five lights per furnace, no shadow." } },
+        { "rocket_power", new[] { "ROCKET ENGINE LIGHT: STRENGTH", "How bright a firing rocket engine lights its surroundings.", "Lamp intensity = Strength, in orange-white. 0 to 50, default 1. 0 turns these lamps off.", "On while the game's own engine light is on, that is while the engine fires. It casts shadows, so its light stays outside the hull. Needs the look on.", "Casts soft shadows: one shadow-casting light per firing engine. The other mod lamps cast none." } },
+        { "rocket_reach", new[] { "ROCKET ENGINE LIGHT: REACH (M)", "How far a firing rocket engine's light reaches.", "Lamp range = Reach. 1 to 200 m, default 100.", "The lamp's light ends at this distance. Needs the look on.", "" } },
+        { "fire_max", new[] { "FIRE LIGHTS: MOST LIGHTS", "The most lamps that fires may use at once.", "0 to 512, default 256. Burning things come first, then gas fires ranked by strength / (1 + 0.01 x distance squared). 0 turns fire lights off.", "Burning gas and burning things (a suit, held items) light the world in orange. Updated every 3rd frame. Needs the look on.", "Up to this many extra lights, no shadow, plus 4 around a burning thing near you." } },
+        { "fire_power", new[] { "FIRE LIGHTS: STRENGTH", "How bright fire lights are.", "Gas fire: intensity about (flame size ^ Gamma) x Strength, half orange, half the fire's own color. Burning thing: Strength x a 0.75 to 1 flicker. Reach fixed 3.5 m. 0 to 10, default 2.98.", "A burning thing within 3 m of the camera also gets 4 lamps 0.6 m around it at 0.6 x Strength, reach 1.8 m, so your burning suit is lit from outside. 0 turns fire lights off.", "Same lights as MOST LIGHTS, no shadow." } },
+        { "fire_gamma", new[] { "FIRE LIGHTS: GAMMA", "Bends how gas fire strength grows with flame size, so weak fires can be lifted or pushed down.", "Strength = flame size ^ Gamma, size 0.01 to 1. Below 1 lifts weak fires, above 1 dims them. 0.2 to 5, default 0.5. A fire below 0.001 after this gets no lamp.", "Also changes which gas fires win a lamp once MOST LIGHTS is reached. Does not affect burning things.", "" } },
+        { "apc_led", new[] { "SMALL DEVICE LIGHTS: LED STRENGTH", "Brightness of the status lamps on power controllers, transformers, vents, ice crushers, heaters, LED displays, doors and the trader waypoint.", "Lamp intensity = LED strength. Heaters 3 x, wide, blast and hangar doors 4 x. LED displays scale with lit characters, full at 6. 0 to 5, default 0.5. 0 turns these off.", "Power controller: blue charging, green charged, red empty, orange error, dark idle. Switches green, blinking orange on error. Heaters glow while heating. Doors show their status color.", "One extra light per device, no shadow." } },
+        { "apc_cell", new[] { "SMALL DEVICE LIGHTS: CELL STRENGTH", "With a power controller's door open, a lamp in front of it shows the color of the battery cell inside.", "Lamp intensity = Cell strength, in the cell's charge color: red, orange, yellow, green or blue. 0 to 5, default 0.5.", "Only while the door is open and the cell shows charge bars. Works with the controller switched off too. Needs the look on.", "One more light per power controller, no shadow." } },
+        { "apc_reach", new[] { "SMALL DEVICE LIGHTS: REACH (M)", "How far the small device lamps reach.", "Lamp range = Reach for power controllers, transformers, vents, ice crushers, LED displays, the waypoint and 1-wide doors. Heaters 2 x, wide doors 3 x. 0.1 to 20 m, default 1.3.", "The lamps' light ends at this distance. Needs the look on.", "" } },
+        { "flash_power", new[] { "FLASHLIGHT LIGHT: STRENGTH", "Adds a soft white lamp at your own worn or held light, so it lights the CAD look around you.", "Lamp intensity = Strength. 0 to 5, default 0.5. 0 turns it off.", "Follows the nearest switched-on worn or held light within 2 m of the camera, in practice yours. It shines all around, not as a beam. Needs the look on.", "One extra light, no shadow." } },
+        { "flash_reach", new[] { "FLASHLIGHT LIGHT: REACH (M)", "How far the flashlight lamp reaches.", "Lamp range = Reach. 0.1 to 20 m, default 5.", "The lamp's light ends at this distance. Needs the look on.", "" } },
+        { "open_folder", new[] { "OPEN MOD FOLDER", "Opens the mod's folder in your file manager.", "", "It holds keys.txt, look_settings.txt, the presets look_preset_1 to 4, the log cad_style_log.txt and the MEASURE results in benchmark_parts.csv.", "" } },
+        { "window_opens", new[] { "THIS WINDOW OPENS BY ITSELF AT THE MAIN MENU", "Chooses when this window opens on its own at the main menu.", "EACH START: once per game start (default). ON CHANGE: only when what the Status tab reports has changed since you last opened the window. NEVER: it stays closed.", "It opens about 2 s after the main menu appears, at most once per game start. F11 opens it any time.", "" } },
+        { "not_today", new[] { "NOT AGAIN TODAY", "Keeps this window from opening by itself for the rest of today.", "", "A click flips between AS SET ABOVE and NOT AGAIN TODAY. It saves today's date in feature_status_not_today.txt. From tomorrow the choice above applies again. F11 still opens the window.", "" } },
+        { "presets", new[] { "PRESETS", "Four slots for your style choices, plus DEFAULTS. A preset keeps every slider and switch, BLEED FIX and DITHERING included, but not LOOK on or off.", "Click loads. Hold 1 s saves into the slot. Arm DELETE, then hold a slot 3 s to delete it. Moving off the slot cancels a hold.", "UNDO takes back the last load, save, delete or DEFAULTS. Load and DEFAULTS undo only until you change a value. A deleted preset is kept as look_preset_N.deleted.txt until UNDO.", "" } },
+        { "check_updates", new[] { "CHECK FOR UPDATES", "Asks GitHub whether a newer version of this mod has been released.", "", "Runs only when you click it. It reads the latest release on the mod's GitHub page and compares it with this version. A newer one shows a link to the download page. Nothing is installed by itself.", "" } },
+        { "measure_bulk", new[] { "MEASURE BULK", "Measures all 8 on/off states of LOOK, BLEED FIX and DITHERING in one run, all off included as the baseline. Saved as one record.", "Each state: switch, wait 2 s (not counted), count 2 s. The 8 states run 3 times, forward, backward, forward, so slow drift cancels. Frame time per state = median of its frames.", "Stand still, about 1.5 minutes. Tooltips pause while it runs. Shows each state's frame time and cost over all off, and the bleed fix's cost with the look on and off. Saved in benchmark_bulk.csv.", "" } },
+        { "measure", new[] { "MEASURE", "Measures what LOOK, BLEED FIX and DITHERING each cost in frame time. Only the parts that are on when you click are measured.", "Each part 18 s: six 3 s spans with only that part on and off in turns, the first 1 s of each not counted. Cost = median frame time on minus median off.", "Stand still. Vsync and the frame cap are off during the run, then restored. Results show below, on the main row and in benchmark_parts.csv. LOOK's result includes the mod's lights.", "" } },
+        { "tab_general", new[] { "GENERAL", "About the mod, its keys, the mod folder, when this window opens by itself, and the presets.", "", "Default keys: F9 look on or off, F11 open or close this window, Esc close it. Change them in keys.txt. The version stamp sits at the bottom.", "" } },
+        { "tab_look", new[] { "LOOK", "The main look: LINES, FACETS, LIGHT BANDS, GLOW with EYE ADAPTATION, and SCENE with SOLID-COLOR TERRAIN.", "", "These work only while the look is on. Finer controls for the same parts are on the Advanced tab.", "" } },
+        { "tab_lights", new[] { "LIGHTS", "The mod's own lamps: screens, machines, batteries, arc furnace, furnaces, rocket engines, fire, small devices and your flashlight.", "", "They exist only while the look is on. Each group's marker shows whether the game parts it needs were found.", "Each lit lamp is one extra light with no shadow, except the rocket engine lamp. All are counted in LOOK's MEASURE result." } },
+        { "tab_advanced", new[] { "ADVANCED", "Fine controls: line detection, facet shading direction, glow color, eye adaptation, dithering strength, faded texture colors, game effects, and MOD COST.", "", "GAME EFFECTS has BLOOM, VOLUMETRIC LIGHT and LAMP SPOTS. MOD COST holds MEASURE, MEASURE BULK and their last results.", "" } },
+        { "tab_status", new[] { "STATUS", "What the mod checked against the game: each feature, whether it is available, and why not.", "", "Missing features are listed near the top, and the tab shows their count in red. Terrain and game effects are checked a few seconds after a world loads. Also shows the engine version.", "" } },
+    };
+
+    static readonly string[] PartLabels = { "LOOK", "BLEED FIX", "DITHERING" };
+    static readonly string[] PartFeature = { "look", "lampfix", "bluenoise" };
+    static readonly string[] PartTips = { "look", "fix", "dither_on" };
+    readonly string[] _partCost = new string[3];   // the last MEASURE result per part, this game session only
+    GUIStyle _sMainLabel, _sMainCost, _sMainCostBad;
+
+    bool PartOn(int i)
+    {
+        // What really runs: during MEASURE and MEASURE BULK the test's own state, not the saved switch (his report 2026-11-16).
+        if (i == 0) return _active;
+        if (i == 1) return _fixForce < 0 ? _b[(int)B.LightFix] : _fixForce == 1;
+        return _ditherForce < 0 ? _b[(int)B.DitherOn] : _ditherForce == 1;
+    }
+
+    void SetPart(int i, bool on)
+    {
+        if (i == 0) { SetActive(on); return; }
+        _b[i == 1 ? (int)B.LightFix : (int)B.DitherOn] = on;
+        ClearUndo();
+        MarkChanged();
+        Log((i == 1 ? "bleed fix" : "dithering") + " switched " + (on ? "on" : "off"));
     }
 
     void DrawTabs(Rect r)
@@ -4384,6 +5035,7 @@ public class CadStyleRunner : MonoBehaviour
                 _tab = i;
                 Pin(_glide[_tab], _tabScroll[_tab].y);
             }
+            Tip(t, TabTipKeys[i]);
             var style = front ? _sTabTextFront : _sTabTextBack;
             if (i == 4 && bad > 0)
             {
@@ -4473,12 +5125,20 @@ public class CadStyleRunner : MonoBehaviour
 
     void DrawPanel(int id)
     {
-        if (Event.current.type == EventType.Repaint) _linkHover = false;
+        bool repaint = Event.current.type == EventType.Repaint;
+        if (repaint)
+        {
+            _linkHover = false;
+            _tipNext = null;
+            _mouseInView = _viewRect.Contains(Event.current.mousePosition);
+        }
         try
         {
             DrawTitleBar(GUILayoutUtility.GetRect(PanelWidth, 38f));
+            DrawMainRow(GUILayoutUtility.GetRect(PanelWidth, MainRowHeight));
             DrawTabs(GUILayoutUtility.GetRect(PanelWidth, 40f));
             Glide(Event.current);
+            _inScroll = true;
             _tabScroll[_tab] = GUILayout.BeginScrollView(_tabScroll[_tab], false, true, GUIStyle.none, _skin != null ? _skin.verticalScrollbar : GUI.skin.verticalScrollbar, GUIStyle.none, GUILayout.ExpandHeight(true));
             GUILayout.BeginVertical(_sContent);
             switch (_tab)
@@ -4492,6 +5152,7 @@ public class CadStyleRunner : MonoBehaviour
             GUILayout.EndVertical();
             if (Event.current.type == EventType.Repaint) _contentHeight = GUILayoutUtility.GetLastRect().height;
             GUILayout.EndScrollView();
+            _inScroll = false;
             if (Event.current.type == EventType.Repaint) _viewRect = GUILayoutUtility.GetLastRect();
             DrawFooter(GUILayoutUtility.GetRect(PanelWidth, 30f));
         }
@@ -4500,6 +5161,8 @@ public class CadStyleRunner : MonoBehaviour
             var text = e.ToString();
             if (text != _lastUiError) { _lastUiError = text; Log("ERROR " + text); }
         }
+        _inScroll = false;
+        if (repaint) _tipKey = _tipNext;
         GUI.DragWindow(new Rect(0f, 0f, PanelWidth, 38f));
     }
 
@@ -4523,6 +5186,7 @@ public class CadStyleRunner : MonoBehaviour
         var keepSkin = GUI.skin;
         if (_skin != null) GUI.skin = _skin;
         _panelRect = GUILayout.Window(PanelWindowId, new Rect(_panelRect.x, 0f, PanelWidth, screenH), DrawPanel, GUIContent.none, _windowStyle, GUILayout.Width(PanelWidth), GUILayout.Height(screenH));
+        DrawTipBox(screenW, screenH);
         GUI.skin = keepSkin;
         _panelRect.x = Mathf.Clamp(_panelRect.x, 0f, Mathf.Max(0f, screenW - PanelWidth));
         _panelRect.y = 0f;

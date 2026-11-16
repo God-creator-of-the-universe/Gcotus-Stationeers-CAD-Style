@@ -94,11 +94,13 @@ Computers and other devices with a screen, fabricators, consoles, vending machin
 
 ### Controls and settings
 
-- **F9 switches the whole look on and off** in an instant. Off means fully off, apart from blue noise, which stays unless you switch it off in the **Look** tab.
+- **F9 switches the look on and off** in an instant. The light bleed fix and blue-noise dithering have their own switches in the window's top row, and both also work with the look off.
 - **Settings window (F11)** with five tabs. Every value is a slider with tick marks at round numbers.
+- **Tips:** point at any control and a box says what it does. **Tips** in the title bar turns them off.
 - **Four preset slots** for your own looks: hold one second to save, click to load. **Defaults** and **Undo** are one click away.
 - **Status tab:** at every start the mod checks the game features it relies on. After a game update you see at once whether something stopped working.
-- **Measure the cost:** an 18-second test shows how much frame time the look takes on your machine.
+- **Measure the cost:** see how much frame time the look, the bleed fix and dithering each take on your machine.
+- **Check for updates:** one click asks GitHub whether a newer version is out. Nothing runs or installs by itself.
 - **The game pauses** while the settings window is open (single player).
 - **Rebind keys** in `keys.txt`.
 - **Updates keep your settings, presets and keys.**
@@ -183,6 +185,8 @@ If you used StationeersMods before, remove its folder from `BepInEx\plugins` fir
 
 ### Updating
 
+To see whether a newer version is out, click **Check for updates** on the **General** tab.
+
 Close the game. Extract the new zip the same way and choose **Replace the files in the destination**. Your settings, presets and keys stay, because the zip doesn't contain them. Don't delete the old folder first: your settings live in it.
 
 ### Uninstalling
@@ -201,19 +205,19 @@ To change a key, click **Open mod folder** on the **General** tab and edit `keys
 
 ### The settings window
 
-- **General:** keys, when the window opens by itself, presets.
+- **General:** keys, when the window opens by itself, presets, update check.
 - **Look:** lines, facets, light bands, glow, terrain.
 - **Lights:** strength and reach of each kind of light the mod adds.
 - **Advanced:** fine control over lines, shading direction, glow color, eye adaptation, the game's own effects, and the cost measurement.
 - **Status:** which features work in your game version.
 
-The title bar has a look on/off switch and a **Pause** switch.
+The title bar has a **Tips** switch and a **Pause** switch. Below it, the top row switches **Look**, **Bleed fix** and **Dithering** on and off, each on its own.
 
 **Presets** hold your look and light values. Hold a slot for one second to save into it; click it to load. To empty a slot, click **Delete**, then hold the slot for three seconds. **Defaults** brings back the mod's tuned values. **Undo** reverses the last load, save, delete or **Defaults** (a load or **Defaults** only until you change a value). When your values differ from the loaded preset, the bottom line of the window says so.
 
 **At the main menu** the window opens by itself. On the **General** tab you can have it open at every start (the default), only when something on the **Status** tab has changed, or never. **Not again today** skips it for the rest of the day.
 
-**Measuring the cost:** on the **Advanced** tab, click **Measure** and stand still. For 18 seconds the look switches on and off while the mod times each frame.
+**Measuring the cost:** on the **Advanced** tab, click **Measure** and stand still. Each part that is on (look, bleed fix, dithering) switches on and off for 18 seconds while the mod times each frame. **Measure bulk** times all 8 on/off combinations of the three in about 1.5 minutes. Results are also saved in the mod folder, in `benchmark_parts.csv` and `benchmark_bulk.csv`.
 
 ## Troubleshooting
 
@@ -239,6 +243,7 @@ You need Python 3 with `UnityPy` and `lz4`, the .NET SDK, and the game with BepI
 
 ## Changelog
 
+- **1.0.2:** look, bleed fix and dithering each have their own switch, and the bleed fix also works with the look off; tips on every control; **Measure** times each part, **Measure bulk** all combinations; **Check for updates** button; dithering is cheaper.
 - **1.0.1:** when the game runs with Vulkan or OpenGL instead of DirectX 11, the look now switches itself off cleanly and the **Status** tab says why.
 - **1.0.0:** first public release.
 
